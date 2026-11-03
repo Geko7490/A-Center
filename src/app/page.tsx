@@ -5,7 +5,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 /* ---------- types ---------- */
 type AnyRec = Record<string, any>;
 type NavKey = "dashboard" | "store" | "models" | "runtimes" | "workspace" | "projects" | "github" | "roblox" | "plugins" | "hardware" | "tasks" | "terminal" | "settings";
-type DesktopBridge = { isDesktop: boolean; getApiToken: () => Promise<string>; chooseStorageDirectory?: () => Promise<string | null>; restartApp?: () => Promise<void> };
+type DesktopBridge = { isDesktop: boolean; getApiToken: () => Promise<string>; chooseStorageDirectory?: () => Promise<string | null>; getStoragePresets?: () => Promise<{ label: string; path: string }[]>; restartApp?: () => Promise<void> };
 
 const NAV: { key: NavKey; label: string; icon: string }[] = [
   { key: "dashboard", label: "Dashboard", icon: "▦" },
@@ -217,7 +217,10 @@ function StoreView() {
   const [loading, setLoading] = useState(false);
   const [downloads, setDownloads] = useState<any[]>([]);
   const [msg, setMsg] = useState("");
-  const [fileName, setFileName] = useState<Record<string, string>>({});
+  const [repoInput, setRepoInput] = useState("mradermacher/Luau-Devstral-24B-Instruct-v0.2-GGUF");
+  const [repoFiles, setRepoFiles] = useState<any[]>([]);
+  const [repoLoaded, setRepoLoaded] = useState("");
+  const [repoLoading, setRepoLoading] = useState(false);
 
   const search = useCallback(async () => {
     setLoading(true); setMsg("");
@@ -236,21 +239,38 @@ function StoreView() {
   async function startDownload(m: any) {
     setMsg("");
     try {
-      let url = "";
       if (m.source === "ollama") {
         // Ollama models install via `ollama pull` — register as managed model instead of HTTP download
         const r = await api("/api/models", { method: "POST", body: JSON.stringify({ name: m.name, repo: m.repo, format: "Ollama", quantization: quant === "all" ? "Q4_K_M" : quant, description: m.description, category: m.category, installPath: `ollama:${m.name}` }) });
         setMsg(`Registered ${r.model.name}. Run: ollama pull ${m.name}  — then Start it from My Models.`);
         return;
       }
-      const fn = (fileName[m.id] || "").trim();
-      if (!fn) { setMsg("Enter the GGUF file name for this HF repo (e.g. model.Q4_K_M.gguf) — naming varies per repo, so Vex never guesses silently."); return; }
-      url = `${m.guessFile}${fn}`;
-      await api("/api/downloads", { method: "POST", body: JSON.stringify({ url, modelName: `${m.name}-${fn.replace(/\.gguf$/i, "")}`, repo: m.repo, quantization: quant === "all" ? "Q4_K_M" : quant }) });
-      setMsg(`Download queued: ${m.repo}/${fn}`);
-      loadDl();
+      openFiles(m.repo);
     } catch (e: any) { setMsg(e.message); }
   }
+  async function loadRepoFiles(repo = repoInput) {
+    setRepoLoading(true); setRepoLoaded(""); setRepoFiles([]); setMsg("");
+    try {
+      const r = await api(`/api/store/files?repo=${encodeURIComponent(repo)}`);
+      setRepoInput(r.repo); setRepoLoaded(r.repo); setRepoFiles(r.files || []);
+      if (!r.files?.length) setMsg("This Hugging Face repo has no GGUF files.");
+    } catch (e: any) { setMsg(e.message); }
+    finally { setRepoLoading(false); }
+  }
+  async function downloadRepoFile(repo: string, file: any) {
+    try {
+      const encodedFile = file.name.split("/").map(encodeURIComponent).join("/");
+      const url = `https://huggingface.co/${repo}/resolve/main/${encodedFile}`;
+      const modelName = `${repo.split("/").pop()}-${file.name.split("/").pop()?.replace(/\.gguf$/i, "")}`;
+      await api("/api/downloads", { method: "POST", body: JSON.stringify({ url, modelName, repo, quantization: file.quantization }) });
+      setMsg(`Download queued: ${repo}/${file.name}`); loadDl();
+    } catch (e: any) { setMsg(e.message); }
+  }
+  function downloadLuauPreset() {
+    const repo = "mradermacher/Luau-Devstral-24B-Instruct-v0.2-GGUF";
+    void downloadRepoFile(repo, { name: "Luau-Devstral-24B-Instruct-v0.2.Q2_K.gguf", sizeBytes: 8.89 * 1024 ** 3, quantization: "Q2_K" });
+  }
+  function openFiles(repo: string) { setRepoInput(repo); void loadRepoFiles(repo); }
   async function dlAction(id: string, action: string) {
     try { await api("/api/downloads", { method: "POST", body: JSON.stringify({ id, action }) }); loadDl(); } catch (e: any) { setMsg(e.message); }
   }
@@ -270,6 +290,26 @@ function StoreView() {
         </div>
         {hfError && <div className="text-[12px] mt-2" style={{ color: "#fbbf24" }}>Hugging Face: {hfError} — showing Ollama catalog (offline-capable).</div>}
         {msg && <div className="text-[12px] mt-2" style={{ color: "#A855F7" }}>{msg}</div>}
+      </div>
+
+      <div className="vex-panel p-3 mb-3">
+        <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+          <div><div className="font-semibold text-[14px]">Hardware quick pick · RX 6700M</div><div className="text-[11px]" style={{ color: "#A1A1AA" }}>Luau coding · Q2_K · about 8.89 GB. 10 GB VRAM means keep context modest; full GPU offload is not guaranteed.</div></div>
+          <div className="flex flex-wrap gap-2"><button className="vex-btn" onClick={downloadLuauPreset}>Download Luau Devstral Q2_K</button><button className="vex-btn-ghost" onClick={() => openFiles("mradermacher/Luau-Devstral-24B-Instruct-v0.2-GGUF")}>Browse files</button></div>
+        </div>
+        <div className="flex flex-wrap gap-2 items-center">
+          <input className="vex-input" style={{ minWidth: 320, flex: 1 }} value={repoInput} onChange={(e) => setRepoInput(e.target.value)} onKeyDown={(e) => e.key === "Enter" && loadRepoFiles()} placeholder="Hugging Face repo: owner/name or URL" />
+          <button className="vex-btn" onClick={() => loadRepoFiles()} disabled={repoLoading}>{repoLoading ? "Loading…" : "Load repository files"}</button>
+        </div>
+        {repoLoaded && <div className="mt-3">
+          <div className="text-[12px] mb-2" style={{ color: "#A1A1AA" }}>{repoLoaded} · {repoFiles.length} GGUF files</div>
+          <div className="grid gap-2" style={{ maxHeight: 280, overflowY: "auto" }}>
+            {repoFiles.map((file) => <div key={file.name} className="vex-panel2 p-2 flex flex-wrap items-center justify-between gap-2">
+              <div className="min-w-0"><div className="text-[12px] vex-code break-all">{file.name}</div><div className="text-[11px]" style={{ color: "#71717a" }}>{file.quantization} · {file.sizeBytes ? fmtBytes(file.sizeBytes) : "size unavailable"}</div></div>
+              <button className="vex-btn-ghost" onClick={() => downloadRepoFile(repoLoaded, file)}>Download</button>
+            </div>)}
+          </div>
+        </div>}
       </div>
 
       {downloads.length > 0 && (
@@ -313,9 +353,9 @@ function StoreView() {
             </div>
             <div className="text-[11px] mt-1" style={{ color: "#71717a" }}>Runtimes: {(m.runtimes || []).join(", ")} · Quants: {(m.quants || []).slice(0, 5).join(", ")}</div>
             {m.source === "huggingface" && (
-              <input className="vex-input mt-2" placeholder="GGUF file name, e.g. Meta-Llama-3.1-8B.Q4_K_M.gguf" value={fileName[m.id] || ""} onChange={(e) => setFileName({ ...fileName, [m.id]: e.target.value })} />
+              <button className="vex-btn-ghost mt-2 w-full" onClick={() => openFiles(m.repo)}>Browse files in this Hugging Face repo</button>
             )}
-            <button className="vex-btn mt-2 w-full" onClick={() => startDownload(m)}>{m.source === "ollama" ? "Register + Pull via Ollama" : "Download GGUF"}</button>
+            <button className="vex-btn mt-2 w-full" onClick={() => m.source === "ollama" ? startDownload(m) : openFiles(m.repo)}>{m.source === "ollama" ? "Register + Pull via Ollama" : "Browse and download GGUF files"}</button>
           </div>
         ))}
       </div>
@@ -1104,8 +1144,15 @@ function SettingsView() {
   const [s, setS] = useState<Record<string, string>>({});
   const [msg, setMsg] = useState("");
   const [saving, setSaving] = useState(false);
+  const [drivePresets, setDrivePresets] = useState<{ label: string; path: string }[]>([]);
   const load = useCallback(async () => { try { const r = await api("/api/settings"); setS(r.settings || {}); } catch (e: any) { setMsg(e.message); } }, []);
   useEffect(() => { const initial = setTimeout(() => load(), 0); return () => clearTimeout(initial); }, [load]);
+  useEffect(() => {
+    let active = true;
+    const desktop = (window as Window & { vexDesktop?: DesktopBridge }).vexDesktop;
+    void desktop?.getStoragePresets?.().then((presets) => { if (active) setDrivePresets(presets); });
+    return () => { active = false; };
+  }, []);
   async function chooseStorageDirectory() {
     const desktop = (window as Window & { vexDesktop?: DesktopBridge }).vexDesktop;
     if (!desktop?.chooseStorageDirectory) { setMsg("Folder selection is available in the installed desktop app."); return; }
@@ -1145,6 +1192,7 @@ function SettingsView() {
           <input className="vex-input" value={s["storage.root"] || ""} onChange={(e) => setS({ ...s, "storage.root": e.target.value })} placeholder="D:\\A-Center" />
           <button className="vex-btn-ghost" onClick={chooseStorageDirectory}>Browse…</button>
         </div>
+        {drivePresets.length > 0 && <div className="flex flex-wrap gap-2" style={{ paddingLeft: 228 }}>{drivePresets.map((drive) => <button key={drive.path} className="vex-btn-ghost" onClick={() => setS({ ...s, "storage.root": drive.path })}>{drive.label} → {drive.path}</button>)}</div>}
         <div className="text-[11px] vex-code" style={{ color: "#71717a", paddingLeft: 228 }}>Models: {s["storage.root"] ? `${s["storage.root"]}\\models` : "—"} · Workspace: {s["storage.root"] ? `${s["storage.root"]}\\workspace` : "—"}</div>
         {row("models.autoRuntime", "Automatic runtime selection", "select", ["1", "0"])}
         {row("chat.defaultTemp", "Default temperature")}

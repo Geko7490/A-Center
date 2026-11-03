@@ -60,6 +60,9 @@ async function startLocalServer() {
     const saved = JSON.parse(fs.readFileSync(configPath, "utf8"));
     if (typeof saved.storageRoot === "string" && path.isAbsolute(saved.storageRoot)) storageRoot = path.resolve(saved.storageRoot);
   } catch {}
+  for (const folder of ["models", "downloads", "workspace", "backups", "plugins", "runtimes"]) {
+    fs.mkdirSync(path.join(storageRoot, folder), { recursive: true });
+  }
   serverProcess = spawn(process.execPath, args, {
     cwd: app.isPackaged ? app.getAppPath() : path.resolve(__dirname, ".."),
     env: {
@@ -116,6 +119,13 @@ app.whenReady().then(async () => {
     if (result.canceled || !result.filePaths[0]) return null;
     const selected = result.filePaths[0];
     return path.basename(selected).toLowerCase() === "a-center" ? selected : path.join(selected, "A-Center");
+  });
+  ipcMain.handle("vex:get-storage-presets", () => {
+    if (process.platform !== "win32") return [];
+    return "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("")
+      .map((letter) => `${letter}:\\`)
+      .filter((drive) => fs.existsSync(drive))
+      .map((drive) => ({ label: `${drive.slice(0, 2)} drive`, path: path.join(drive, "A-Center") }));
   });
   ipcMain.handle("vex:restart-app", () => {
     app.relaunch();
