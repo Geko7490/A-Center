@@ -1,0 +1,8 @@
+node_modules/
+.next/
+.vex-storage/
+release/
+*.log
+.env*
+!.env.example
+

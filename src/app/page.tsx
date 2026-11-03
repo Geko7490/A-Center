@@ -23,7 +23,9 @@ const NAV: { key: NavKey; label: string; icon: string }[] = [
 ];
 
 async function api(path: string, init?: RequestInit): Promise<any> {
-  const res = await fetch(path, { ...init, headers: { "content-type": "application/json", ...(init?.headers || {}) } });
+  const desktop = typeof window !== "undefined" ? (window as Window & { vexDesktop?: { isDesktop: boolean; getApiToken: () => Promise<string> } }).vexDesktop : undefined;
+  const token = desktop?.isDesktop ? await desktop.getApiToken() : "";
+  const res = await fetch(path, { ...init, headers: { "content-type": "application/json", ...(token ? { "x-vex-local-token": token } : {}), ...(init?.headers || {}) } });
   const text = await res.text();
   let json: any = {};
   try { json = text ? JSON.parse(text) : {}; } catch { json = { _raw: text }; }
@@ -66,14 +68,14 @@ export default function VexApp() {
     try { setDash(await api("/api/dashboard")); } catch { /* ignore */ }
   }, []);
   useEffect(() => {
-    loadDash();
+    const initial = setTimeout(() => loadDash(), 0);
+    const onlineCheck = setTimeout(() => setOnline(navigator.onLine), 0);
     const t = setInterval(loadDash, 8000);
     const on = () => setOnline(navigator.onLine);
     window.addEventListener("online", on);
     window.addEventListener("offline", on);
-    setOnline(navigator.onLine);
     api("/api/tasks", { method: "POST", body: JSON.stringify({ action: "recover" }) }).catch(() => {});
-    return () => { clearInterval(t); window.removeEventListener("online", on); window.removeEventListener("offline", on); };
+    return () => { clearTimeout(initial); clearTimeout(onlineCheck); clearInterval(t); window.removeEventListener("online", on); window.removeEventListener("offline", on); };
   }, [loadDash]);
 
   return (
@@ -333,7 +335,7 @@ function ModelsView() {
   const load = useCallback(async () => {
     try { const r = await api("/api/models"); setModels(r.models || []); } catch (e: any) { setMsg(e.message); }
   }, []);
-  useEffect(() => { load(); const t = setInterval(load, 5000); return () => clearInterval(t); }, [load]);
+  useEffect(() => { const initial = setTimeout(() => load(), 0); const t = setInterval(load, 5000); return () => { clearTimeout(initial); clearInterval(t); }; }, [load]);
 
   async function act(id: string, action: string, extra?: any) {
     setBusy(id + action); setMsg("");
@@ -428,7 +430,7 @@ function RuntimesView() {
   const load = useCallback(async () => {
     try { const r = await api("/api/runtimes"); setRuntimes(r.runtimes || []); setOllama(r.ollama); } catch (e: any) { setMsg(e.message); }
   }, []);
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { const initial = setTimeout(() => load(), 0); return () => clearTimeout(initial); }, [load]);
   async function act(name: string, action: string, extra?: any) {
     setMsg("");
     try { await api("/api/runtimes", { method: "POST", body: JSON.stringify({ name, action, ...extra }) }); load(); }
@@ -614,7 +616,7 @@ function ProjectsView() {
     const p = await api(`/api/projects/files?projectId=${id}&pending=1`);
     setPending(p.pending || []);
   }, []);
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { const initial = setTimeout(() => load(), 0); return () => clearTimeout(initial); }, [load]);
 
   async function register() {
     setMsg("");
@@ -760,7 +762,7 @@ function GithubView() {
   const [newBranch, setNewBranch] = useState("");
 
   const load = useCallback(async () => { try { const r = await api("/api/git"); setRepos(r.repos || []); } catch (e: any) { setMsg(e.message); } }, []);
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { const initial = setTimeout(() => load(), 0); return () => clearTimeout(initial); }, [load]);
   async function run(body: any) {
     setMsg(""); setOut("");
     try { const r = await api("/api/git", { method: "POST", body: JSON.stringify(body) }); setOut(r.out || r.output || JSON.stringify(r).slice(0, 2000)); load(); }
@@ -822,16 +824,44 @@ function RobloxView() {
   const [args, setArgs] = useState('{"service":"Workspace"}');
 
   const load = useCallback(async () => { try { const r = await api("/api/roblox"); setBridge(r.bridge); } catch (e: any) { setMsg(e.message); } }, []);
-  useEffect(() => { load(); const t = setInterval(load, 4000); return () => clearInterval(t); }, [load]);
+  useEffect(() => { const initial = setTimeout(() => load(), 0); const t = setInterval(load, 4000); return () => { clearTimeout(initial); clearInterval(t); }; }, [load]);
   async function run(action: string, extra?: any) {
     setMsg("");
-    try { const r = await api("/api/roblox", { method: "POST", body: JSON.stringify({ action, ...extra }) }); setMsg(r.note || r.result ? JSON.stringify(r.result || r.note) : "ok"); load(); }
+    try {
+      const r = await api("/api/roblox", { method: "POST", body: JSON.stringify({ action, ...extra }) });
+      if (action === "send-command" && r.commandId) {
+        setMsg("Command queued; waiting for Roblox Studio…");
+        const deadline = Date.now() + 60000;
+        while (Date.now() < deadline) {
+          await new Promise((resolve) => setTimeout(resolve, 800));
+          const state = await api(`/api/roblox/commands/${r.commandId}`);
+          if (state.command.status === "completed") { setMsg(JSON.stringify(state.command.result, null, 2)); break; }
+          if (state.command.status === "failed") { setMsg(state.command.error || "Studio command failed."); break; }
+        }
+        if (Date.now() >= deadline) setMsg("Timed out waiting for Studio. Check that the plugin is connected and HTTP requests are enabled.");
+      } else setMsg(r.note || r.result ? JSON.stringify(r.result || r.note) : "ok");
+      load();
+    }
     catch (e: any) { setMsg(e.message); }
+  }
+  async function downloadPlugin() {
+    try {
+      const desktop = (window as Window & { vexDesktop?: { isDesktop: boolean; getApiToken: () => Promise<string> } }).vexDesktop;
+      const token = desktop?.isDesktop ? await desktop.getApiToken() : "";
+      const response = await fetch("/api/roblox?download=plugin", { headers: token ? { "x-vex-local-token": token } : {} });
+      if (!response.ok) throw new Error(`Plugin download failed (${response.status}).`);
+      const url = URL.createObjectURL(await response.blob());
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = "VexBridge.luau";
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch (e: any) { setMsg(e.message); }
   }
   return (
     <div>
       <h1 className="text-xl font-bold mb-1">Roblox Integration</h1>
-      <p className="text-[13px] mb-3" style={{ color: "#A1A1AA" }}>Vex AI Center → local bridge (127.0.0.1) → authenticated WebSocket/poll → Studio plugin. Only real plugin capabilities are exposed. Works fully offline.</p>
+      <p className="text-[13px] mb-3" style={{ color: "#A1A1AA" }}>A-Center on this PC → authenticated HTTP polling over loopback → Roblox Studio plugin. Enable Studio HTTP requests and keep A-Center open while connected.</p>
       {msg && <pre className="vex-panel p-2.5 mb-3 text-[12px] vex-pre" style={{ borderColor: "#A855F7" }}>{msg}</pre>}
       <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(auto-fit,minmax(340px,1fr))" }}>
         <div className="vex-panel p-3">
@@ -840,7 +870,7 @@ function RobloxView() {
           <div className="text-[12px] mt-1" style={{ color: "#A1A1AA" }}>Plugin v{bridge?.pluginVersion} · Bridge v{bridge?.bridgeVersion}</div>
           <div className="text-[12px] mt-1 vex-code" style={{ color: "#A1A1AA" }}>token: {(bridge?.token || "").slice(0, 18)}… <button className="vex-btn-ghost ml-1" style={{ padding: "1px 8px", fontSize: 11 }} onClick={() => { navigator.clipboard?.writeText(bridge?.token || ""); setMsg("Token copied."); }}>copy</button></div>
           <div className="flex flex-wrap gap-2 mt-3">
-            <a className="vex-btn" style={{ textDecoration: "none" }} href="/api/roblox?download=plugin">Download Plugin (.luau)</a>
+            <button className="vex-btn" onClick={downloadPlugin}>Download Plugin (.luau)</button>
             <button className="vex-btn" onClick={() => run("connect")}>Connect to Studio</button>
             <button className="vex-btn-ghost" onClick={() => run("simulate-studio", { token: bridge?.token })}>Self-test handshake</button>
             <button className="vex-btn-ghost" onClick={() => run("check-install")}>Check Installation</button>
@@ -876,7 +906,7 @@ function PluginsView() {
   const [plugins, setPlugins] = useState<any[]>([]);
   const [msg, setMsg] = useState("");
   const load = useCallback(async () => { try { const r = await api("/api/plugins"); setPlugins(r.plugins || []); } catch (e: any) { setMsg(e.message); } }, []);
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { const initial = setTimeout(() => load(), 0); return () => clearTimeout(initial); }, [load]);
   async function act(key: string, action: string) {
     setMsg("");
     try { const r = await api("/api/plugins", { method: "POST", body: JSON.stringify({ key, action }) }); if (r.detail) setMsg(`${key}: ${r.detail}`); load(); }
@@ -963,7 +993,9 @@ function TasksView() {
   const [auto, setAuto] = useState(true);
   const load = useCallback(async () => { try { const r = await api("/api/tasks"); setTasks(r.tasks || []); } catch (e: any) { setMsg(e.message); } }, []);
   useEffect(() => {
-    load(); api("/api/models").then((r) => setModels(r.models || [])).catch(() => {});
+    const initial = setTimeout(() => {
+      load(); api("/api/models").then((r) => setModels(r.models || [])).catch(() => {});
+    }, 0);
     const t = setInterval(load, 2500); return () => clearInterval(t);
   }, [load]);
   // auto-advance running tasks step by step
@@ -1036,7 +1068,7 @@ function TerminalView() {
   const [msg, setMsg] = useState("");
   const [busy, setBusy] = useState(false);
   const load = useCallback(async () => { try { const r = await api("/api/terminal"); setHist(r.history || []); } catch {} }, []);
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { const initial = setTimeout(() => load(), 0); return () => clearTimeout(initial); }, [load]);
   async function execCmd(approve = false) {
     if (!cmd.trim() || busy) return;
     setBusy(true); setMsg("");
@@ -1071,7 +1103,7 @@ function SettingsView() {
   const [s, setS] = useState<Record<string, string>>({});
   const [msg, setMsg] = useState("");
   const load = useCallback(async () => { try { const r = await api("/api/settings"); setS(r.settings || {}); } catch (e: any) { setMsg(e.message); } }, []);
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { const initial = setTimeout(() => load(), 0); return () => clearTimeout(initial); }, [load]);
   async function save() {
     setMsg("");
     try { await api("/api/settings", { method: "POST", body: JSON.stringify({ values: s }) }); setMsg("Settings saved."); }
@@ -1114,3 +1146,4 @@ function SettingsView() {
     </div>
   );
 }
+

@@ -227,14 +227,14 @@ export function pairingToken(): string {
   return "vex-" + crypto.randomBytes(16).toString("hex");
 }
 
-export function robloxPluginSource(bridgeToken: string): string {
+export function robloxPluginSource(bridgeToken: string, port = 7817): string {
   return `-- Vex AI Center :: Roblox Studio Bridge Plugin (Luau)
 -- Install: place this file in %LOCALAPPDATA%/Roblox/Plugins/VexBridge.luau
 -- Manual install supported. Never overwritten silently by Vex AI Center.
 local HttpService = game:GetService("HttpService")
 local Selection = game:GetService("Selection")
 local StudioService = game:GetService("StudioService")
-local BRIDGE_URL = "http://127.0.0.1:7817/roblox"
+local BRIDGE_URL = "http://127.0.0.1:${port}/roblox"
 local AUTH_TOKEN = "${bridgeToken}"
 local toolbar = plugin:CreateToolbar("Vex AI")
 local toggleBtn = toolbar:CreateButton("VexBridge", "Connect Vex AI Center local bridge", "rbxassetid://0")
@@ -340,3 +340,4 @@ export function walkDir(root: string, opts?: { maxFiles?: number; exclude?: stri
   }
   return out;
 }
+

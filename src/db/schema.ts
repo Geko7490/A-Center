@@ -186,6 +186,18 @@ export const robloxBridges = pgTable("vex_roblox", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
+export const robloxCommands = pgTable("vex_roblox_commands", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  bridgeId: uuid("bridge_id").notNull(),
+  command: text("command").notNull(),
+  args: jsonb("args").$type<Record<string, unknown>>().notNull().default({}),
+  status: text("status").notNull().default("queued"),
+  result: jsonb("result").$type<unknown>(),
+  error: text("error").notNull().default(""),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  completedAt: timestamp("completed_at"),
+});
+
 export const terminalHistory = pgTable("vex_terminal_history", {
   id: uuid("id").primaryKey().defaultRandom(),
   command: text("command").notNull(),
@@ -202,3 +214,4 @@ export const appSettings = pgTable("vex_settings", {
   value: text("value").notNull().default(""),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
+

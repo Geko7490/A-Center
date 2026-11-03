@@ -1,24 +1,30 @@
-import { drizzle } from "drizzle-orm/node-postgres";
-import { Pool } from "pg";
-
-const databaseUrl = process.env.DATABASE_URL;
-
-if (!databaseUrl) {
-  throw new Error("DATABASE_URL is required");
-}
+import { PGlite } from "@electric-sql/pglite";
+import { drizzle } from "drizzle-orm/pglite";
+import { migrate } from "drizzle-orm/pglite/migrator";
+import fs from "node:fs";
+import path from "node:path";
+import { STORAGE_ROOT } from "@/lib/vex";
+import * as schema from "./schema";
 
 const globalForDb = globalThis as typeof globalThis & {
-  __arenaNextJsPostgresqlPool?: Pool;
+  __aCenterPglite?: PGlite;
+  __aCenterMigration?: Promise<void>;
 };
 
-export const pool =
-  globalForDb.__arenaNextJsPostgresqlPool ??
-  new Pool({
-    connectionString: databaseUrl,
-  });
+const isNextBuild = process.env.NEXT_PHASE === "phase-production-build";
+if (!isNextBuild) fs.mkdirSync(STORAGE_ROOT, { recursive: true });
+export const client = isNextBuild ? null : globalForDb.__aCenterPglite ?? new PGlite(path.join(STORAGE_ROOT, "database"));
+if (client) globalForDb.__aCenterPglite = client;
 
-if (process.env.NODE_ENV !== "production") {
-  globalForDb.__arenaNextJsPostgresqlPool = pool;
+const createDb = () => drizzle(client!, { schema });
+export const db = (client ? createDb() : null) as ReturnType<typeof createDb>;
+const migrationsFolder = process.env.VEX_MIGRATIONS_DIR || path.join(process.cwd(), "drizzle");
+
+export function initializeDb(): Promise<void> {
+  if (!client) return Promise.reject(new Error("Database is unavailable during the Next.js build."));
+  if (!globalForDb.__aCenterMigration) {
+    globalForDb.__aCenterMigration = migrate(db, { migrationsFolder });
+  }
+  return globalForDb.__aCenterMigration;
 }
 
-export const db = drizzle(pool);

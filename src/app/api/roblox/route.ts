@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
-import { robloxBridges } from "@/db/schema";
-import { desc, eq } from "drizzle-orm";
+import { robloxBridges, robloxCommands } from "@/db/schema";
+import { asc, desc, eq } from "drizzle-orm";
 import { pairingToken, robloxPluginSource } from "@/lib/vex";
 
 async function current() {
@@ -15,7 +15,8 @@ export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   if (searchParams.get("download") === "plugin") {
     const b = await current();
-    return new NextResponse(robloxPluginSource(b.token), {
+    const port = Number(new URL(req.url).port) || 7817;
+    return new NextResponse(robloxPluginSource(b.token, port), {
       headers: { "content-type": "text/plain", "content-disposition": `attachment; filename="VexBridge.luau"` },
     });
   }
@@ -55,9 +56,10 @@ export async function POST(req: NextRequest) {
     const cmd = (body as { command?: string; args?: Record<string, unknown> }).command || "inspect";
     const allowed = ["inspect", "read-script", "write-script", "create-instance", "set-property"];
     if (!allowed.includes(cmd)) return NextResponse.json({ error: `unknown command ${cmd}` }, { status: 400 });
-    await db.update(robloxBridges).set({ logs: log(`queued command: ${cmd} ${JSON.stringify((body as { args?: unknown }).args || {}).slice(0, 300)}`) }).where(eq(robloxBridges.id, b.id));
-    // Honest response: queued for the Studio plugin poll loop
-    return NextResponse.json({ ok: true, queued: true, note: "Command queued. The Studio plugin picks it up on its next 1s poll and POSTs the result back." });
+    const args = (body as { args?: Record<string, unknown> }).args || {};
+    const [queued] = await db.insert(robloxCommands).values({ bridgeId: b.id, command: cmd, args }).returning();
+    await db.update(robloxBridges).set({ logs: log(`queued command ${queued.id}: ${cmd} ${JSON.stringify(args).slice(0, 300)}`) }).where(eq(robloxBridges.id, b.id));
+    return NextResponse.json({ ok: true, queued: true, commandId: queued.id, note: "Command queued for Roblox Studio." });
   }
   if (a === "check-install") {
     await db.update(robloxBridges).set({ logs: log("install check: expected %LOCALAPPDATA%/Roblox/Plugins/VexBridge.luau (manual verify on Windows host)") }).where(eq(robloxBridges.id, b.id));
@@ -69,3 +71,4 @@ export async function POST(req: NextRequest) {
   }
   return NextResponse.json({ error: "unknown action" }, { status: 400 });
 }
+
