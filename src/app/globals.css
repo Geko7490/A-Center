@@ -1,0 +1,59 @@
+@import "tailwindcss";
+
+:root {
+  --vex-primary: #a855f7;
+  --vex-bg: #101014;
+  --vex-panel: #1c1b23;
+  --vex-panel2: #242330;
+  --vex-text: #ffffff;
+  --vex-muted: #a1a1aa;
+}
+
+html, body {
+  background: var(--vex-bg);
+  color: var(--vex-text);
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+* { scrollbar-width: thin; scrollbar-color: #3f3f46 transparent; }
+*::-webkit-scrollbar { width: 8px; height: 8px; }
+*::-webkit-scrollbar-thumb { background: #3f3f46; border-radius: 4px; }
+*::-webkit-scrollbar-track { background: transparent; }
+
+.vex-panel { background: var(--vex-panel); border: 1px solid #2e2d3a; border-radius: 6px; }
+.vex-panel2 { background: var(--vex-panel2); border: 1px solid #35344a; border-radius: 6px; }
+.vex-input {
+  background: #131318; border: 1px solid #2e2d3a; border-radius: 6px;
+  color: #fff; padding: 8px 12px; font-size: 13px; outline: none; width: 100%;
+}
+.vex-input:focus { border-color: var(--vex-primary); }
+.vex-btn {
+  background: var(--vex-primary); color: #fff; border-radius: 6px;
+  padding: 7px 14px; font-size: 13px; font-weight: 600; transition: opacity .15s;
+  border: none; cursor: pointer; white-space: nowrap;
+}
+.vex-btn:hover { opacity: .88; }
+.vex-btn:disabled { opacity: .45; cursor: not-allowed; }
+.vex-btn-ghost {
+  background: transparent; border: 1px solid #2e2d3a; color: var(--vex-text);
+  border-radius: 6px; padding: 7px 14px; font-size: 13px; cursor: pointer; white-space: nowrap;
+}
+.vex-btn-ghost:hover { border-color: var(--vex-primary); }
+.vex-btn-danger { background: #dc2626; color: #fff; border-radius: 6px; padding: 7px 14px; font-size: 13px; font-weight: 600; border: none; cursor: pointer; }
+.vex-btn-danger:hover { opacity: .88; }
+.vex-nav {
+  display: flex; align-items: center; gap: 10px; width: 100%;
+  padding: 8px 12px; border-radius: 6px; font-size: 13px;
+  color: var(--vex-muted); cursor: pointer; border: none; background: transparent; text-align: left;
+  transition: background .12s, color .12s;
+}
+.vex-nav:hover { background: #242330; color: #fff; }
+.vex-nav.active { background: rgba(168, 85, 247, .14); color: #fff; border-left: 2px solid var(--vex-primary); }
+.vex-badge { font-size: 11px; padding: 2px 8px; border-radius: 6px; font-weight: 600; }
+.vex-code { font-family: ui-monospace, "Cascadia Code", Consolas, monospace; font-size: 12px; }
+.vex-diff-add { color: #4ade80; }
+.vex-diff-del { color: #f87171; }
+.vex-bar { height: 6px; background: #2e2d3a; border-radius: 3px; overflow: hidden; }
+.vex-bar > div { height: 100%; background: var(--vex-primary); transition: width .3s; }
+.vex-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+pre.vex-pre { white-space: pre-wrap; word-break: break-word; }
