@@ -17,8 +17,10 @@ export function middleware(request: NextRequest) {
   if (origin) {
     try {
       const parsed = new URL(origin);
-      const host = parsed.hostname.toLowerCase();
-      if (!LOOPBACK_HOSTS.has(host) || parsed.origin !== request.nextUrl.origin) {
+      const requestHost = request.headers.get("host") || request.nextUrl.host;
+      const requestUrl = new URL(`http://${requestHost}`);
+      const port = (url: URL) => url.port || (url.protocol === "https:" ? "443" : "80");
+      if (parsed.protocol !== "http:" || !LOOPBACK_HOSTS.has(parsed.hostname.toLowerCase()) || !LOOPBACK_HOSTS.has(requestUrl.hostname.toLowerCase()) || port(parsed) !== port(requestUrl)) {
         return NextResponse.json({ error: "cross-origin request blocked" }, { status: 403 });
       }
     } catch {

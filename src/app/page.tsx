@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 /* ---------- types ---------- */
 type AnyRec = Record<string, any>;
-type NavKey = "dashboard" | "store" | "models" | "runtimes" | "workspace" | "projects" | "github" | "roblox" | "plugins" | "hardware" | "tasks" | "terminal" | "settings";
+type NavKey = "dashboard" | "store" | "models" | "runtimes" | "workspace" | "projects" | "github" | "roblox" | "plugins" | "hardware" | "tasks" | "terminal" | "settings" | "tutorial";
 type DesktopBridge = { isDesktop: boolean; getApiToken: () => Promise<string>; chooseStorageDirectory?: () => Promise<string | null>; getStoragePresets?: () => Promise<{ label: string; path: string }[]>; restartApp?: () => Promise<void> };
 
 const NAV: { key: NavKey; label: string; icon: string }[] = [
@@ -21,6 +21,7 @@ const NAV: { key: NavKey; label: string; icon: string }[] = [
   { key: "tasks", label: "Task Manager", icon: "☰" },
   { key: "terminal", label: "Terminal", icon: "›" },
   { key: "settings", label: "Settings", icon: "⚒" },
+  { key: "tutorial", label: "Kullanım Rehberi", icon: "❔" },
 ];
 
 async function api(path: string, init?: RequestInit): Promise<any> {
@@ -127,9 +128,28 @@ export default function VexApp() {
         {nav === "tasks" && <TasksView />}
         {nav === "terminal" && <TerminalView />}
         {nav === "settings" && <SettingsView />}
+        {nav === "tutorial" && <TutorialView go={setNav} />}
       </main>
     </div>
   );
+}
+
+/* ================= KULLANIM REHBERI ================= */
+function TutorialView({ go }: { go: (n: NavKey) => void }) {
+  const sections = [
+    { title: "1 · Depolama yerini D: sürücüsüne taşı", text: "Settings → D: drive → Save settings. A-Center D:\\A-Center\models, downloads, workspace, runtimes ve diğer klasörleri oluşturur; mevcut dosyaları taşır ve yeniden başlar. Taşıma sırasında indirmeleri iptal et, runtime'ları durdur ve D: sürücüsünde model boyutundan fazla boş alan bırak. PGlite veritabanı küçük kaldığı için kullanıcı profilindeki C: konumunda kalır." },
+    { title: "2 · Hugging Face'ten model bul ve indir", text: "Model Store'da Hugging Face kaynağını seçip model adıyla ara. Belirli bir repo için owner/name veya Hugging Face URL'sini repo kutusuna yapıştır, Load repository files'e bas. GGUF dosyaları boyut ve quant etiketiyle görünür; istediğinin Download düğmesine bas. İndirme tamamlanınca dosya My Models'a eklenir." },
+    { title: "3 · Bu laptopta Luau Devstral çalıştır", text: "Model Store'daki RX 6700M hızlı seçeneği Luau Devstral Q2_K dosyasını indirir. Bu yaklaşık 8.89 GB ağırlığındadır. Settings değil, Runtime Manager → Apply hybrid profile ile 8 CPU thread, auto VRAM layers ve 4K context ayarla. Vulkan destekli Windows llama.cpp paketindeki llama-cli.exe ve yan DLL'leri ekrandaki llama.cpp runtime klasörüne koy; sonra AI Workspace'te modeli seç." },
+    { title: "4 · Hibrit çalışma ne yapar?", text: "llama.cpp --n-gpu-layers auto ve --fit on ile GPU belleğine sığan katmanları RX 6700M'e, kalanını 32 GB sistem belleği ve Ryzen 7 5800H işlemciye bırakır. Modelin tamamı VRAM'e sığmak zorunda değildir; CPU/RAM desteği hızın düşmesine yol açabilir. GPU layers alanında auto önerilir. Bağlamı 4K'dan başlat; bellek veya hız sorunu olursa 2K'ya indir." },
+    { title: "5 · Roblox Studio bağlantısı", text: "Roblox Integration → Download Plugin; .luau dosyasını Studio Plugins klasörüne koy. Studio'da HTTP requests'i etkinleştir, eklentiyi açıp Connect to Studio'ya bas. Komutlar bu bilgisayardaki A-Center ile Studio arasında yerel bağlantıdan gider." },
+    { title: "Sorun giderme", text: "D: taşıma cross-origin hatası verirse A-Center'ı güncel kurulum paketiyle yeniden kurup tekrar dene. Taşıma etkin indirme/runtime varken başlamaz. Hugging Face araması için internet gerekir. GGUF sohbeti için Vulkan destekli llama-cli.exe şarttır; yoksa Runtime Manager'daki gösterilen klasöre ekle. İndirme tamamlandı ama model çalışmıyorsa llama-cli sürümünü ve modelin My Models'daki dosya yolunu kontrol et." },
+  ];
+  return <div>
+    <h1 className="text-xl font-bold mb-1">A-Center kullanım rehberi</h1>
+    <p className="text-[13px] mb-4" style={{ color: "#A1A1AA" }}>Bu uygulamada ayarlar, modeller, hibrit çalışma ve Roblox bağlantısı nasıl kullanılır?</p>
+    <div className="grid gap-3" style={{ maxWidth: 900 }}>{sections.map((section) => <section key={section.title} className="vex-panel p-4"><h2 className="font-semibold text-[14px] mb-2">{section.title}</h2><p className="text-[13px] leading-6" style={{ color: "#c4c4cc" }}>{section.text}</p></section>)}</div>
+    <button className="vex-btn mt-4" onClick={() => go("settings")}>Ayarları aç</button>
+  </div>;
 }
 
 /* ================= DASHBOARD ================= */
