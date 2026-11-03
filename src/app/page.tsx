@@ -1,6 +1,3 @@
-Warning: truncated output (original token count: 22241)
-Total output lines: 1169
-
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -571,7 +568,116 @@ function WorkspaceView() {
             {msgs.length === 0 && <div className="text-[13px]" style={{ color: "#71717a" }}>{cid ? "No messages yet. Set your models on the right, then ask anything — inference stays on this machine." : "Create or select a conversation."}</div>}
             <div ref={bottomRef} />
           </div>
-          <input className="vex-input mb-2" placeholder="Optional: paste file/error context to attach" value={attac…2241 tokens truncated…/div>
+          <input className="vex-input mb-2" placeholder="Optional: paste file/error context to attach" value={attach} onChange={(e) => setAttach(e.target.value)} />
+          <div className="flex gap-2">
+            <input className="vex-input" placeholder={cur ? `Message (${cur.mode})… Enter to send` : "Select a conversation"} value={prompt} onChange={(e) => setPrompt(e.target.value)} onKeyDown={(e) => e.key === "Enter" && send()} disabled={!cid || sending} />
+            <button className="vex-btn" onClick={send} disabled={!cid || sending}>{sending ? "…" : "Send"}</button>
+          </div>
+        </div>
+        <div className="vex-panel p-3 text-[13px] space-y-2">
+          <div className="font-semibold">Session config</div>
+          <label style={{ color: "#A1A1AA" }} className="text-[12px]">Mode<select className="vex-input mt-1" value={mode} onChange={(e) => setMode(e.target.value)}><option value="chat">General chat</option><option value="code">Coding</option><option value="agent">Agent</option><option value="vision">Vision</option></select></label>
+          <label style={{ color: "#A1A1AA" }} className="text-[12px]">Primary model<select className="vex-input mt-1" value={modelId} onChange={(e) => setModelId(e.target.value)}><option value="">(auto by mode)</option>{models.map((m) => <option key={m.id} value={m.name}>{m.name} [{m.status}]</option>)}</select></label>
+          <label style={{ color: "#A1A1AA" }} className="text-[12px]">Planning model<select className="vex-input mt-1" value={planning} onChange={(e) => setPlanning(e.target.value)}><option value="">—</option>{models.map((m) => <option key={m.id} value={m.name}>{m.name}</option>)}</select></label>
+          <label style={{ color: "#A1A1AA" }} className="text-[12px]">Coding model<select className="vex-input mt-1" value={coding} onChange={(e) => setCoding(e.target.value)}><option value="">—</option>{models.map((m) => <option key={m.id} value={m.name}>{m.name}</option>)}</select></label>
+          <label style={{ color: "#A1A1AA" }} className="text-[12px]">Utility model<select className="vex-input mt-1" value={utility} onChange={(e) => setUtility(e.target.value)}><option value="">—</option>{models.map((m) => <option key={m.id} value={m.name}>{m.name}</option>)}</select></label>
+          <label style={{ color: "#A1A1AA" }} className="text-[12px]">System prompt<textarea className="vex-input mt-1" rows={3} value={sys} onChange={(e) => setSys(e.target.value)} placeholder="You are a senior engineer…" /></label>
+          <div className="grid gap-2" style={{ gridTemplateColumns: "1fr 1fr" }}>
+            <label style={{ color: "#A1A1AA" }} className="text-[12px]">Temp<input className="vex-input mt-1" type="number" step={0.1} min={0} max={2} value={temp} onChange={(e) => setTemp(Number(e.target.value))} /></label>
+            <label style={{ color: "#A1A1AA" }} className="text-[12px]">Context<input className="vex-input mt-1" type="number" value={ctx} onChange={(e) => setCtx(Number(e.target.value))} /></label>
+          </div>
+          <button className="vex-btn-ghost w-full" onClick={saveSettings}>Save session</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ================= PROJECTS ================= */
+function ProjectsView() {
+  const [projects, setProjects] = useState<any[]>([]);
+  const [sel, setSel] = useState<any>(null);
+  const [detail, setDetail] = useState<any>(null);
+  const [file, setFile] = useState("");
+  const [content, setContent] = useState("");
+  const [msg, setMsg] = useState("");
+  const [filter, setFilter] = useState("");
+  const [pending, setPending] = useState<any[]>([]);
+  const [form, setForm] = useState({ name: "", path: "", permissionMode: "approval" });
+  const [perm, setPerm] = useState({ permissionMode: "approval", protectedFiles: "", terminalAllowed: false, fileSizeLimitKb: 1024 });
+
+  const load = useCallback(async () => {
+    const r = await api("/api/projects");
+    setProjects(r.projects || []);
+  }, []);
+  const loadDetail = useCallback(async (id: string) => {
+    const r = await api(`/api/projects?id=${id}`);
+    setDetail(r); setSel(r.project);
+    setPerm({ permissionMode: r.project.permissionMode, protectedFiles: ((r.project.protectedFiles as string[]) || []).join(", "), terminalAllowed: r.project.terminalAllowed, fileSizeLimitKb: r.project.fileSizeLimitKb });
+    const p = await api(`/api/projects/files?projectId=${id}&pending=1`);
+    setPending(p.pending || []);
+  }, []);
+  useEffect(() => { const initial = setTimeout(() => load(), 0); return () => clearTimeout(initial); }, [load]);
+
+  async function register() {
+    setMsg("");
+    try {
+      const r = await api("/api/projects", { method: "POST", body: JSON.stringify(form) });
+      setMsg(`Registered: ${r.project.path}`); setForm({ name: "", path: "", permissionMode: "approval" }); load();
+    } catch (e: any) { setMsg(e.message); }
+  }
+  async function openFile(f: string) {
+    setFile(f); setMsg("");
+    try { const r = await api(`/api/projects/files?projectId=${sel.id}&file=${encodeURIComponent(f)}`); setContent(r.content ?? ""); }
+    catch (e: any) { setMsg(e.message); setContent(""); }
+  }
+  async function save(action = "write") {
+    if (!sel || !file) return;
+    setMsg("");
+    try {
+      const r = await api("/api/projects/files", { method: "POST", body: JSON.stringify({ projectId: sel.id, file, content, action, reason: "manual edit" }) });
+      setMsg(r.queued ? `Queued for approval (mode: approval). Review in Pending Changes.` : `Saved. Diff:\n${(r.diff || "").slice(0, 800)}`);
+      loadDetail(sel.id);
+    } catch (e: any) { setMsg(e.message); }
+  }
+  async function approve(id: string, ok: boolean) {
+    try { await api("/api/projects/files", { method: "POST", body: JSON.stringify({ projectId: sel.id, action: ok ? "approve" : "reject", id }) }); loadDetail(sel.id); } catch (e: any) { setMsg(e.message); }
+  }
+  async function rollback(id: string) {
+    if (!confirm("Rollback this change?")) return;
+    try { await api("/api/projects/files", { method: "POST", body: JSON.stringify({ projectId: sel.id, action: "rollback", id }) }); setMsg("Rolled back."); loadDetail(sel.id); } catch (e: any) { setMsg(e.message); }
+  }
+  async function savePerm() {
+    try {
+      await api("/api/projects", { method: "POST", body: JSON.stringify({ action: "update", id: sel.id, permissionMode: perm.permissionMode, protectedFiles: perm.protectedFiles.split(",").map((s) => s.trim()).filter(Boolean), terminalAllowed: perm.terminalAllowed, fileSizeLimitKb: perm.fileSizeLimitKb }) });
+      setMsg("Permissions saved."); loadDetail(sel.id);
+    } catch (e: any) { setMsg(e.message); }
+  }
+
+  const files = (detail?.files || []).filter((f: any) => !filter || f.path.toLowerCase().includes(filter.toLowerCase()));
+  return (
+    <div>
+      <h1 className="text-xl font-bold mb-1">Project Manager</h1>
+      <p className="text-[13px] mb-3" style={{ color: "#A1A1AA" }}>Real filesystem access, jailed to the project dir. Read-only · Approval (diffs) · Auto (backups + rollback). Path traversal blocked, protected files enforced.</p>
+      {msg && <pre className="vex-panel p-2.5 mb-3 text-[12px] vex-pre" style={{ borderColor: "#A855F7" }}>{msg}</pre>}
+      <div className="grid gap-3" style={{ gridTemplateColumns: "280px 1fr" }}>
+        <div>
+          <div className="vex-panel p-3 mb-3">
+            <div className="font-semibold text-[14px] mb-2">Connect folder</div>
+            <input className="vex-input mb-2" placeholder="Project name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} />
+            <input className="vex-input mb-2" placeholder="Subfolder (blank = from name)" value={form.path} onChange={(e) => setForm({ ...form, path: e.target.value })} />
+            <select className="vex-input mb-2" value={form.permissionMode} onChange={(e) => setForm({ ...form, permissionMode: e.target.value })}><option value="read-only">Read Only</option><option value="approval">Approval Mode</option><option value="auto">Auto Mode</option></select>
+            <button className="vex-btn w-full" onClick={register}>Register project</button>
+          </div>
+          <div className="vex-panel p-2">
+            {(projects || []).map((p) => (
+              <div key={p.id} className={`vex-nav ${sel?.id === p.id ? "active" : ""}`} style={{ cursor: "pointer" }} onClick={() => loadDetail(p.id)}>
+                <span className="flex-1 truncate">{p.name}<br /><span className="text-[11px]" style={{ color: "#71717a" }}>{p.permissionMode}</span></span>
+                <button className="text-[11px]" style={{ color: "#71717a" }} onClick={async (e) => { e.stopPropagation(); if (confirm("Unregister project (files kept)?")) { await api("/api/projects", { method: "POST", body: JSON.stringify({ action: "delete", id: p.id }) }); setSel(null); setDetail(null); load(); } }}>✕</button>
+              </div>
+            ))}
+            {projects.length === 0 && <div className="text-[12px] p-2" style={{ color: "#71717a" }}>No projects yet.</div>}
+          </div>
         </div>
         <div>
           {!sel && <div className="vex-panel p-4 text-[13px]" style={{ color: "#A1A1AA" }}>Select or register a project to scan its structure, read files and apply AI edits.</div>}
