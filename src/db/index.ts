@@ -13,7 +13,7 @@ const globalForDb = globalThis as typeof globalThis & {
 
 const isNextBuild = process.env.NEXT_PHASE === "phase-production-build";
 if (!isNextBuild) fs.mkdirSync(STORAGE_ROOT, { recursive: true });
-export const client = isNextBuild ? null : globalForDb.__aCenterPglite ?? new PGlite(path.join(STORAGE_ROOT, "database"));
+export const client = isNextBuild ? null : globalForDb.__aCenterPglite ?? new PGlite(process.env.VEX_DATABASE || path.join(STORAGE_ROOT, "database"));
 if (client) globalForDb.__aCenterPglite = client;
 
 const createDb = () => drizzle(client!, { schema });

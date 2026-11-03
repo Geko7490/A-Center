@@ -4,5 +4,7 @@ contextBridge.exposeInMainWorld("vexDesktop", {
   isDesktop: true,
   platform: process.platform,
   getApiToken: () => ipcRenderer.invoke("vex:get-api-token"),
+  chooseStorageDirectory: () => ipcRenderer.invoke("vex:choose-storage-directory"),
+  restartApp: () => ipcRenderer.invoke("vex:restart-app"),
 });
 

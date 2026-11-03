@@ -53,6 +53,13 @@ async function startLocalServer() {
   localToken = crypto.randomBytes(32).toString("hex");
   const userData = app.getPath("userData");
   fs.mkdirSync(userData, { recursive: true });
+  const defaultStorageRoot = path.join(userData, "storage");
+  const configPath = path.join(userData, "settings.json");
+  let storageRoot = defaultStorageRoot;
+  try {
+    const saved = JSON.parse(fs.readFileSync(configPath, "utf8"));
+    if (typeof saved.storageRoot === "string" && path.isAbsolute(saved.storageRoot)) storageRoot = path.resolve(saved.storageRoot);
+  } catch {}
   serverProcess = spawn(process.execPath, args, {
     cwd: app.isPackaged ? app.getAppPath() : path.resolve(__dirname, ".."),
     env: {
@@ -62,7 +69,9 @@ async function startLocalServer() {
       HOSTNAME: "127.0.0.1",
       PORT: String(port),
       VEX_LOCAL_TOKEN: localToken,
-      VEX_STORAGE: path.join(userData, "storage"),
+      VEX_STORAGE: storageRoot,
+      VEX_DATABASE: path.join(defaultStorageRoot, "database"),
+      VEX_CONFIG_PATH: configPath,
       VEX_MIGRATIONS_DIR: path.join(app.isPackaged ? app.getAppPath() : path.resolve(__dirname, ".."), "drizzle"),
     },
     stdio: "ignore",
@@ -99,6 +108,19 @@ function createWindow() {
 app.whenReady().then(async () => {
   app.setAppUserModelId("com.vex.a-center");
   ipcMain.handle("vex:get-api-token", () => localToken);
+  ipcMain.handle("vex:choose-storage-directory", async () => {
+    const result = await require("electron").dialog.showOpenDialog(mainWindow, {
+      title: "Choose a drive or parent folder for A-Center data",
+      properties: ["openDirectory", "createDirectory"],
+    });
+    if (result.canceled || !result.filePaths[0]) return null;
+    const selected = result.filePaths[0];
+    return path.basename(selected).toLowerCase() === "a-center" ? selected : path.join(selected, "A-Center");
+  });
+  ipcMain.handle("vex:restart-app", () => {
+    app.relaunch();
+    app.exit(0);
+  });
   session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
     callback({
       responseHeaders: {

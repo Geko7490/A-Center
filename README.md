@@ -24,7 +24,7 @@ The desktop shell starts Next.js on a loopback-only random port, waits for the l
 
 ## Local data
 
-The embedded PGlite database and managed storage live below Electron's per-user application data directory. There is no PostgreSQL service to install. Database migrations are generated with `npm run db:generate` and applied before the desktop window opens.
+The embedded PGlite database lives below Electron's per-user application data directory. Models, downloads, projects and other managed files use the configurable Storage folder in Settings. Changing it moves existing files, updates saved paths, and restarts the app; active downloads and runtimes must be stopped first. There is no PostgreSQL service to install. Database migrations are generated with `npm run db:generate` and applied before the desktop window opens.
 
 ## Roblox Studio bridge
 
