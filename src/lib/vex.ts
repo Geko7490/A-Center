@@ -2,7 +2,8 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import crypto from "node:crypto";
-import { execSync, exec } from "node:child_process";
+import { execSync, exec, execFile } from "node:child_process";
+import { promisify } from "node:util";
 
 export const STORAGE_ROOT =
   process.env.VEX_STORAGE || path.join(process.cwd(), ".vex-storage");
@@ -208,6 +209,40 @@ export async function ollamaGenerate(model: string, prompt: string, system?: str
   const toks = j.eval_count || Math.ceil((j.response || "").length / 4);
   const tps = ms > 0 ? Math.round((toks / ms) * 1000) : 0;
   return { text: j.response || "", ms, tps };
+}
+
+const execFileAsync = promisify(execFile);
+
+export async function llamaCppGenerate(modelPath: string, prompt: string, system: string, opts?: { temperature?: number; contextTokens?: number; cpuThreads?: number; gpuLayers?: number | string }): Promise<{ text: string; ms: number; tps: number }> {
+  if (!fs.existsSync(modelPath)) throw new Error(`GGUF model file not found: ${modelPath}`);
+  const runtimeDir = path.join(RUNTIMES_DIR, "llama.cpp");
+  const candidates = process.platform === "win32"
+    ? [path.join(runtimeDir, "llama-cli.exe"), "llama-cli.exe"]
+    : [path.join(runtimeDir, "llama-cli"), "llama-cli"];
+  const errors: string[] = [];
+  const started = Date.now();
+  const contextTokens = Math.max(1024, Math.min(8192, Math.floor(opts?.contextTokens || 4096)));
+  const cpuThreads = Math.max(1, Math.min(os.cpus().length, Math.floor(opts?.cpuThreads || os.cpus().length / 2 || 4)));
+  const requestedLayers = opts?.gpuLayers ?? "auto";
+  const gpuLayers = typeof requestedLayers === "number" ? String(Math.max(0, Math.min(200, Math.floor(requestedLayers)))) : ["auto", "all"].includes(requestedLayers) ? requestedLayers : "auto";
+  const args = ["-m", modelPath, "-p", `${system ? `${system}\n\n` : ""}${prompt}`, "-n", "512", "-c", String(contextTokens), "-t", String(cpuThreads), "-ngl", gpuLayers, "--fit", "on", "--no-display-prompt", "--temp", String(opts?.temperature ?? 0.7)];
+  for (const executable of candidates) {
+    if (path.isAbsolute(executable) && !fs.existsSync(executable)) continue;
+    try {
+      const result = await execFileAsync(executable, args, { timeout: 10 * 60 * 1000, maxBuffer: 8 * 1024 * 1024, windowsHide: true });
+      const text = result.stdout.trim();
+      if (!text) throw new Error(result.stderr.trim().slice(-1000) || "llama.cpp returned no text");
+      const ms = Date.now() - started;
+      const tokens = Math.ceil(text.length / 4);
+      return { text, ms, tps: Math.round((tokens / Math.max(1, ms)) * 1000) };
+    } catch (error) {
+      const e = error as Error & { stderr?: string };
+      errors.push(`${executable}: ${(e.stderr || e.message || "failed").slice(-500)}`);
+      if ((e as NodeJS.ErrnoException).code === "ENOENT") continue;
+      throw new Error(`llama.cpp failed: ${errors.at(-1)}. Use a Vulkan-enabled Windows build for the RX 6700M; CPU fallback uses ${cpuThreads} threads.`);
+    }
+  }
+  throw new Error(`llama-cli was not found in ${runtimeDir} or PATH. Install a Vulkan-enabled llama.cpp build first.`);
 }
 
 export function localFallbackReply(prompt: string, mode: string, systemPrompt?: string): { text: string; tps: number } {

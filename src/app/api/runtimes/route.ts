@@ -11,7 +11,7 @@ async function seed() {
   const rows = await db.select().from(runtimes);
   for (const d of RUNTIME_DEFS) {
     if (!rows.find((r) => r.name === d.name)) {
-      await db.insert(runtimes).values({ name: d.name, displayName: d.displayName, version: "", installed: false, installPath: path.join(RUNTIMES_DIR, d.name), status: "stopped", logs: "", config: { cpuThreads: 4, gpuLayers: 0, ctxSize: 4096 } });
+      await db.insert(runtimes).values({ name: d.name, displayName: d.displayName, version: "", installed: false, installPath: path.join(RUNTIMES_DIR, d.name), status: "stopped", logs: "", config: { cpuThreads: 8, gpuLayers: "auto", ctxSize: 4096 } });
     }
   }
 }
@@ -87,3 +87,4 @@ export async function POST(req: NextRequest) {
   }
   return NextResponse.json({ error: "unknown action" }, { status: 400 });
 }
+

@@ -477,10 +477,17 @@ function RuntimesView() {
     try { await api("/api/runtimes", { method: "POST", body: JSON.stringify({ name, action, ...extra }) }); load(); }
     catch (e: any) { setMsg(e.message); }
   }
+  async function applyHybridPreset() {
+    const config = { cpuThreads: 8, gpuLayers: "auto", ctxSize: 4096 };
+    setCfg((current) => ({ ...current, "llama.cpp": config }));
+    await act("llama.cpp", "config", { config });
+    setMsg("RX 6700M + 32 GB RAM profile saved: 8 CPU threads, automatic VRAM fit, 4K context.");
+  }
   return (
     <div>
       <div className="flex items-center justify-between mb-1"><h1 className="text-xl font-bold">Runtime Manager</h1><button className="vex-btn-ghost" onClick={load}>Re-detect</button></div>
       <p className="text-[13px] mb-3" style={{ color: "#A1A1AA" }}>Modular adapters: llama.cpp · Ollama · ONNX · Transformers. Auto-selection inspects format → hardware → memory before loading. CUDA never required.</p>
+      <div className="vex-panel p-3 mb-3 text-[12px]" style={{ color: "#A1A1AA" }}>RX 6700M + 32 GB RAM: llama.cpp hybrid mode uses GPU layers that fit VRAM and keeps remaining layers in system RAM/CPU. Select a GGUF model in AI Workspace; install a Vulkan-enabled llama-cli.exe into the llama.cpp runtime folder first. <button className="vex-btn-ghost mt-2" onClick={applyHybridPreset}>Apply hybrid profile (8 threads · auto VRAM · 4K)</button></div>
       {msg && <div className="vex-panel p-2.5 mb-3 text-[13px]" style={{ borderColor: "#A855F7" }}>{msg}</div>}
       <div className="vex-panel p-3 mb-3 text-[13px]">
         <b>Ollama live probe:</b> {ollama?.available ? <span style={{ color: "#4ade80" }}>reachable — {ollama.models.length} models: {(ollama.models || []).join(", ") || "(none pulled)"}</span> : <span style={{ color: "#f87171" }}>offline ({ollama?.error || "not running"}) — start `ollama serve` for real inference</span>}
@@ -495,8 +502,9 @@ function RuntimesView() {
             <div className="text-[12px] mt-1 vex-code" style={{ color: "#A1A1AA" }}>detect: {r.detected}</div>
             <div className="text-[11px] vex-code truncate" style={{ color: "#71717a" }}>{r.installPath}</div>
             <div className="grid gap-2 mt-2" style={{ gridTemplateColumns: "1fr 1fr 1fr" }}>
-              <label className="text-[11px]" style={{ color: "#A1A1AA" }}>CPU threads<input className="vex-input mt-1" type="number" defaultValue={r.config?.cpuThreads ?? 4} onChange={(e) => setCfg({ ...cfg, [r.name]: { ...(cfg[r.name] || {}), cpuThreads: Number(e.target.value) } })} /></label>
-              <label className="text-[11px]" style={{ color: "#A1A1AA" }}>GPU layers<input className="vex-input mt-1" type="number" defaultValue={r.config?.gpuLayers ?? 0} onChange={(e) => setCfg({ ...cfg, [r.name]: { ...(cfg[r.name] || {}), gpuLayers: Number(e.target.value) } })} /></label>
+              <label className="text-[11px]" style={{ color: "#A1A1AA" }}>CPU threads<input className="vex-input mt-1" type="number" defaultValue={r.config?.cpuThreads ?? 8} onChange={(e) => setCfg({ ...cfg, [r.name]: { ...(cfg[r.name] || {}), cpuThreads: Number(e.target.value) } })} /></label>
+              <label className="text-[11px]" style={{ color: "#A1A1AA" }}>GPU layers (auto/number)<input className="vex-input mt-1" type="text" defaultValue={r.config?.gpuLayers ?? "auto"} onChange={(e) => { const raw = e.target.value; setCfg({ ...cfg, [r.name]: { ...(cfg[r.name] || {}), gpuLayers: /^\d+$/.test(raw) ? Number(raw) : raw } }); }} /></label>
+              <label className="text-[11px]" style={{ color: "#A1A1AA" }}>Ctx size<input className="vex-input mt-1" type="number" defaultValue={r.config?.ctxSize ?? 4096} onChange={(e) => setCfg({ ...cfg, [r.name]: { ...(cfg[r.name] || {}), ctxSize: Number(e.target.value) } })} /></label>
               <label className="text-[11px]" style={{ color: "#A1A1AA" }}>Ctx size<input className="vex-input mt-1" type="number" defaultValue={r.config?.ctxSize ?? 4096} onChange={(e) => setCfg({ ...cfg, [r.name]: { ...(cfg[r.name] || {}), ctxSize: Number(e.target.value) } })} /></label>
             </div>
             <div className="flex flex-wrap gap-2 mt-2">

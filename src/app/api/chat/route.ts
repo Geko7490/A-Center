@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
-import { conversations, messages, models } from "@/db/schema";
+import { conversations, messages, models, runtimes } from "@/db/schema";
 import { desc, eq } from "drizzle-orm";
-import { checkOllama, ollamaGenerate, localFallbackReply } from "@/lib/vex";
+import { checkOllama, ollamaGenerate, llamaCppGenerate, localFallbackReply } from "@/lib/vex";
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
@@ -60,12 +60,23 @@ export async function POST(req: NextRequest) {
   }
   // Check installed models
   const installed = await db.select().from(models);
+  const selectedLocalModel = installed.find((model) => model.name === activeModel);
   const running = installed.filter((m) => m.status === "running");
   let text = "", ms = 0, tps = 0, engine = "local-fallback";
   const oc = await checkOllama();
-  const ollamaTarget = activeModel && oc.models.includes(activeModel) ? activeModel : oc.models[0] || "";
+  const ollamaTarget = activeModel ? (oc.models.includes(activeModel) ? activeModel : "") : oc.models[0] || "";
   try {
-    if (oc.available && ollamaTarget) {
+    if (selectedLocalModel?.format === "GGUF" && selectedLocalModel.installPath && !selectedLocalModel.installPath.startsWith("ollama:")) {
+      const llamaRows = await db.select().from(runtimes).where(eq(runtimes.name, "llama.cpp"));
+      const llamaConfig = (llamaRows[0]?.config || {}) as { cpuThreads?: number; gpuLayers?: number | string; ctxSize?: number };
+      const r = await llamaCppGenerate(selectedLocalModel.installPath, fullPrompt, conv.systemPrompt || "", {
+        temperature: conv.temperature,
+        contextTokens: conv.contextTokens || llamaConfig.ctxSize || 4096,
+        cpuThreads: llamaConfig.cpuThreads || 8,
+        gpuLayers: llamaConfig.gpuLayers ?? "auto",
+      });
+      text = r.text; ms = r.ms; tps = r.tps; engine = `llama.cpp:${selectedLocalModel.name}`;
+    } else if (oc.available && ollamaTarget) {
       const r = await ollamaGenerate(ollamaTarget, fullPrompt, conv.systemPrompt || undefined, { temperature: conv.temperature, num_ctx: conv.contextTokens });
       text = r.text; ms = r.ms; tps = r.tps; engine = `ollama:${ollamaTarget}`;
     } else {
@@ -74,9 +85,14 @@ export async function POST(req: NextRequest) {
       tps = 0; ms = 120; engine = "vex-offline-fallback";
     }
   } catch (e: unknown) {
-    const fb = localFallbackReply(fullPrompt, conv.mode, conv.systemPrompt);
-    text = fb.text + `\n\n_Inference error: ${e instanceof Error ? e.message : "unknown"}. Showing offline fallback._`;
-    engine = "vex-offline-fallback";
+    if (selectedLocalModel?.format === "GGUF") {
+      text = `Local GGUF inference failed: ${e instanceof Error ? e.message : "unknown error"}`;
+      engine = "llama.cpp-error";
+    } else {
+      const fb = localFallbackReply(fullPrompt, conv.mode, conv.systemPrompt);
+      text = fb.text + `\n\n_Inference error: ${e instanceof Error ? e.message : "unknown"}. Showing offline fallback._`;
+      engine = "vex-offline-fallback";
+    }
   }
   const tokens = Math.ceil(text.length / 4);
   const [msg] = await db.insert(messages).values({ conversationId: b.conversationId, role: "assistant", content: text, tokens, genMs: ms, tokensPerSec: tps }).returning();
@@ -85,3 +101,4 @@ export async function POST(req: NextRequest) {
   }
   return NextResponse.json({ message: msg, engine, ollama: oc });
 }
+
