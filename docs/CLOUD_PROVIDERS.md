@@ -4,7 +4,7 @@
 
 1. Open API Providers in the installed desktop app. Enter a key, save it, and enable the provider. API keys are never returned to the renderer after saving.
 2. For EVREN, read the current terms and explicitly accept the exact displayed version. No background process accepts terms.
-3. Refresh models, choose a default, and inspect capabilities in Model Center. Public NVIDIA catalog access does not prove account-specific generation access; a successful inference is needed for that.
+3. Refresh models, choose a default, and inspect capabilities in Model Center. Then press Test Connection: with a default model selected, it makes a small authenticated generation request and records actual usage. Without a default it reports only catalog connectivity. Public NVIDIA catalog access does not prove account-specific generation access; a successful inference is needed for that.
 4. In AI Workspace, select a provider/model. A conversation retains its history when models change. Cloud messages, images and approved tool results leave the computer and go to the selected provider. Local GGUF/Ollama inference remains available.
 5. For agent tools, select Agent mode and an authorized project. Tool-capable models propose actions. Inspect the full arguments, then approve or reject each action. Read-only/protected-file rules are rechecked at execution. Project terminal permission must also be enabled for commands/tests. Continue the agent with the actual results. Task Manager can open a plan in this agent flow; a model answer does not automatically verify checklist steps.
 

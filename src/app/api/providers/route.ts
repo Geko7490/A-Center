@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { aiManager, isProviderId } from "@/lib/ai/manager";
 import { PROVIDERS, redact } from "@/lib/ai/provider";
-import { cachedModels, providerConfig, usageHistory, writeValue, invalidateModelDetails } from "@/lib/ai/store";
+import { cachedModels, providerConfig, usageHistory, writeValue, invalidateModelDetails, trackUsage } from "@/lib/ai/store";
 import { ProviderError } from "@/lib/ai/types";
 import { storageBusy } from "@/lib/maintenance";
 export const dynamic="force-dynamic";
@@ -28,6 +28,24 @@ export async function POST(req:NextRequest) {
       let terms;
       if(id==="evren"){terms=await client.json("/terms/status");if(terms.accepted!==true)return NextResponse.json({termsRequired:true,status:terms,text:await client.json("/terms/text")});}
       const models=await aiManager.catalog(id,true);const health={status:"catalog_connected",at:new Date().toISOString(),generationVerified:false};await writeValue(`ai.health.${id}`,health);
+      if(b.action==="test") {
+        const config=await providerConfig(id);
+        if(!config.defaultModel)return NextResponse.json({models,health,note:"Katalog alındı. Kimlik doğrulamalı üretimi test etmek için varsayılan modeli seçip testi yeniden çalıştır."});
+        const model=id==="evren"?await client.model(config.defaultModel):models.find(m=>m.id===config.defaultModel);
+        if(!model)throw new ProviderError("Default model not found","model_not_found",404);
+        if(id==="evren"&&!["chat","vision_chat"].includes(model.task))throw new ProviderError("Choose a chat model for the connection test","unsupported_task",400);
+        let output="",reasoning=false,finish="";let usage;
+        for await(const event of client.generate({model,messages:[{role:"user",content:"Reply briefly with OK."}],maxTokens:Math.min(64,model.capabilities.maxOutput||64),thinking:model.capabilities.thinking?false:undefined,signal:req.signal})){
+          if(event.type==="text")output+=event.text||"";
+          if(event.type==="reasoning"&&event.text)reasoning=true;
+          if(event.type==="finish")finish=event.reason||"";
+          if(event.type==="usage")usage=event.usage;
+        }
+        if(!finish||(!output.trim()&&!reasoning))throw new ProviderError("Provider returned no generated content","empty_response",502);
+        if(usage)await trackUsage(id,model.id,usage,crypto.randomUUID());
+        const verified={status:"generation_verified",at:new Date().toISOString(),generationVerified:true,model:model.id};await writeValue(`ai.health.${id}`,verified);
+        return NextResponse.json({models,health:verified,note:`Kimlik doğrulamalı gerçek model yanıtı alındı: ${model.id}.`,probe:{output:output.slice(0,500),reasoningReturned:reasoning,finishReason:finish,usage:usage||null}});
+      }
       return NextResponse.json({models,health,terms,note:id==="nvidia"?"Public catalog retrieved. Account/model generation access is verified only by a successful chat request.":"Authenticated catalog retrieved; no generation test performed."});
     }
     throw new ProviderError("Unknown action","invalid_request",400);
