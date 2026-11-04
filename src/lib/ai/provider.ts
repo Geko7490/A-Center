@@ -79,8 +79,20 @@ export class OpenAICompatibleProvider {
       else throw error;
     }
     yield { type: "status", status: "connected" };
-    if (!body.stream) {
-      const data = await response.json(); const m = data.choices?.[0]?.message;
+    if (!body.stream || response.headers.get("content-type")?.includes("application/json")) {
+      const data = await response.json();
+      if(mode==="responses") {
+        for(const item of data.output||[]) {
+          if(item.type==="message")for(const part of item.content||[])if(part.type==="output_text"&&part.text)yield{type:"text",text:part.text};
+          if(item.type==="reasoning")for(const part of item.summary||[])if(part.text)yield{type:"reasoning",text:part.text};
+          if(item.type==="function_call")yield{type:"tool",call:{id:item.call_id,type:"function",function:{name:item.name,arguments:item.arguments||""}}};
+        }
+        if(data.usage)yield{type:"usage",usage:data.usage};
+        if(data.status==="completed"&&data.id)yield{type:"response_id",id:data.id};
+        if(!["completed","incomplete"].includes(data.status))throw new ProviderError("Responses request did not complete","invalid_response");
+        yield{type:"finish",reason:data.status==="completed"?"stop":data.incomplete_details?.reason||"length"};return;
+      }
+      const m = data.choices?.[0]?.message;
       if (!m) throw new ProviderError("Provider returned no message", "invalid_response");
       if (m.reasoning_content || m.reasoning) yield { type: "reasoning", text: m.reasoning_content || m.reasoning };
       if (m.content) yield { type: "text", text: m.content };

@@ -17,6 +17,6 @@
 2. Version 0.2.0 adds an approval-based cloud agent tool loop and links plans to it. Independent autonomous scheduling and automatic checklist verification remain future work; plan completion still requires review.
 3. One-click runtime package download with signed/checksummed binaries, version pinning and update management; current runtime binaries are supplied manually.
 4. Private/gated Hugging Face repository authentication through the OS credential store, richer filters and revision/checksum pinning.
-5. Roblox Studio end-to-end testing, stale-connection detection and command recovery after app restarts.
+5. Roblox Studio UI end-to-end testing remains. Version 0.2.1 adds a stable desktop bridge on loopback port 7817, real heartbeat expiry, visible plugin errors, atomic command delivery and acknowledged result retries. Disconnect/token changes invalidate pending commands rather than replaying side effects. The installed plugin must be updated once; old downloads embed a random, expired app port.
 6. Crash recovery journal spanning configuration and database relocation; source backups are retained to avoid data loss if Windows stops during a commit. Old source models must be removed manually after validating the new location.
 7. Installer upgrade/uninstall UI testing and signing. Successful packaging alone does not prove installation behavior.

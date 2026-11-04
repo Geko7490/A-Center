@@ -5,6 +5,8 @@ import path from 'node:path';
 import net from 'node:net';
 import http from 'node:http';
 import { spawn } from 'node:child_process';
+import { createRequire } from 'node:module';
+const {createRobloxBridge}=createRequire(import.meta.url)('../desktop/roblox-bridge.cjs');
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'acenter-smoke-'));
 const storage = path.join(temp, 'source');
 const target = path.join(temp, 'target');
@@ -19,10 +21,37 @@ async function api(url, body, method = 'POST') {
  return {status:response.status, data:await response.json()};
 }
 let origin;
+let studioRelay;
 try {
  let healthy=false;
  for(let i=0;i<120;i++){ try {if((await api('/api/health',null,'GET')).status===200){healthy=true;break;}}catch{} await new Promise(r=>setTimeout(r,500)); }
  assert(healthy, logs);
+ // Exercise the real Studio HTTP transport while the desktop API remains token protected.
+ studioRelay=await createRobloxBridge(`http://127.0.0.1:${port}`,0);
+ const bridge=(await api('/api/roblox',null,'GET')).data.bridge;
+ const studio=async(route,body,extra={})=>{const r=await fetch(`http://127.0.0.1:${studioRelay.port}/roblox/${route}`,{method:body?'POST':'GET',headers:{'x-vex-token':bridge.token,...extra},...(body?{body:JSON.stringify(body)}:{})});return{status:r.status,data:r.headers.get('content-type')?.includes('json')?await r.json():null};};
+ assert.equal((await studio('next-command',null,{'x-vex-token':'wrong'})).status,401);
+ assert.equal((await studio('next-command',null,{origin:'https://untrusted.invalid'})).status,403);
+ assert.equal((await fetch(`http://127.0.0.1:${studioRelay.port}/api/providers`)).status,403);
+ assert.equal((await api('/api/roblox',{action:'simulate-studio',token:bridge.token})).status,200);
+ assert.notEqual((await api('/api/roblox',null,'GET')).data.bridge.status,'connected');
+ assert.equal((await api('/api/roblox',{action:'send-command',command:'inspect'})).status,409);
+ await api('/api/roblox',{action:'connect'});
+ assert.equal((await studio('next-command?version=1.3.0')).status,200);
+ assert.equal((await api('/api/roblox',null,'GET')).data.bridge.status,'connected');
+ assert.equal((await api('/api/roblox',{action:'send-command',args:{action:'write-script'}})).status,400);
+ const queued=(await api('/api/roblox',{action:'send-command',command:'inspect',args:{service:'Workspace'}})).data;
+ const deliveries=await Promise.all([studio('next-command'),studio('next-command')]);
+ assert.equal(deliveries.filter(r=>r.data?.id===queued.commandId).length,1);
+ const receipt={id:queued.commandId,ok:true,result:{Name:'Workspace',Children:[]}};
+ assert.equal((await studio('command-result',receipt)).status,200);
+ assert.equal((await studio('command-result',receipt)).status,200);
+ assert.equal((await api(`/api/roblox/commands/${queued.commandId}`,null,'GET')).data.command.status,'completed');
+ const cancelled=(await api('/api/roblox',{action:'send-command',command:'inspect'})).data;
+ await api('/api/roblox',{action:'disconnect'});
+ assert.equal((await studio('next-command')).status,409);
+ assert.equal((await api(`/api/roblox/commands/${cancelled.commandId}`,null,'GET')).data.command.status,'failed');
+ console.log('PASS actual Studio relay, pairing/origin guards, real heartbeat, atomic command claim, idempotent receipt and disconnect');
  const crossOrigin=await fetch(`http://127.0.0.1:${port}/api/providers`,{method:'POST',headers:{'content-type':'application/json','x-vex-local-token':'smoke-token',origin:'https://untrusted.invalid'},body:JSON.stringify({provider:'evren',action:'test'})});assert.equal(crossOrigin.status,403);
  assert.equal((await api('/api/settings',{values:{'storage.root':path.parse(target).root}})).status,400);
  assert.equal((await api('/api/projects',{name:'escape',path:'../escape'})).status,400);
@@ -64,6 +93,7 @@ try {
  assert.equal((await api('/api/models',{name:'blocked'})).status,409);
  console.log('PASS volume-root rejection, rollback, relocation, source backup and restart lock');
 } finally {
+ studioRelay?.close();
  origin?.close(); child.kill(); await new Promise(r=>child.exitCode!==null?r():child.once('close',r));
  assert(path.resolve(temp).startsWith(path.resolve(os.tmpdir())+path.sep)); fs.rmSync(temp,{recursive:true,force:true});
 }

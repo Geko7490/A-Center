@@ -95,7 +95,7 @@ export default function VexApp() {
             <div style={{ width: 30, height: 30, borderRadius: 6, background: "linear-gradient(135deg,#A855F7,#6D28D9)", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 16 }}>V</div>
             <div>
               <div className="font-bold text-[15px] leading-tight">Vex AI Center</div>
-              <div className="text-[11px]" style={{ color: "#A1A1AA" }}>AI Platform · v0.2.0</div>
+              <div className="text-[11px]" style={{ color: "#A1A1AA" }}>AI Platform · v0.2.1</div>
             </div>
           </div>
           <div className="mt-3 flex items-center gap-2 text-[11px]" style={{ color: "#A1A1AA" }}>
@@ -121,7 +121,7 @@ export default function VexApp() {
 
       {/* Main */}
       <main className="flex-1 overflow-y-auto p-5" style={{ minWidth: 0 }}>
-        {nav === "providers" && <AIProviders api={api} />}
+        {nav === "providers" && <AIProviders api={api} select={(model)=>{sessionStorage.setItem("acenter-selected-model",model);setNav("workspace");}} />}
         {nav === "modelcenter" && <ModelCenter api={api} select={(model) => { sessionStorage.setItem("acenter-selected-model", model); setNav("workspace"); }} />}
         {nav === "dashboard" && <DashboardView dash={dash} reload={loadDash} go={setNav} />}
         {nav === "store" && <StoreView />}
@@ -149,7 +149,7 @@ function TutorialView({ go }: { go: (n: NavKey) => void }) {
     { title: "2 · Hugging Face'ten model bul ve indir", text: "Model Store'da Hugging Face kaynağını seçip model adıyla ara. Belirli bir repo için owner/name veya Hugging Face URL'sini repo kutusuna yapıştır, Load repository files'e bas. GGUF dosyaları boyut ve quant etiketiyle görünür; istediğinin Download düğmesine bas. İndirme tamamlanınca dosya My Models'a eklenir." },
     { title: "3 · Bu laptopta Luau Devstral çalıştır", text: "Model Store'daki RX 6700M hızlı seçeneği Luau Devstral Q2_K dosyasını indirir. Bu yaklaşık 8.89 GB ağırlığındadır. Settings değil, Runtime Manager → Apply hybrid profile ile 8 CPU thread, auto VRAM layers ve 4K context ayarla. Vulkan destekli Windows llama.cpp paketindeki llama-cli.exe ve yan DLL'leri ekrandaki llama.cpp runtime klasörüne koy; sonra AI Workspace'te modeli seç." },
     { title: "4 · Hibrit çalışma ne yapar?", text: "llama.cpp --n-gpu-layers auto ve --fit on ile GPU belleğine sığan katmanları RX 6700M'e, kalanını 32 GB sistem belleği ve Ryzen 7 5800H işlemciye bırakır. Modelin tamamı VRAM'e sığmak zorunda değildir; CPU/RAM desteği hızın düşmesine yol açabilir. GPU layers alanında auto önerilir. Bağlamı 4K'dan başlat; bellek veya hız sorunu olursa 2K'ya indir." },
-    { title: "5 · Roblox Studio bağlantısı", text: "Roblox Integration → Download Plugin; .luau dosyasını Studio Plugins klasörüne koy. Studio'da HTTP requests'i etkinleştir, eklentiyi açıp Connect to Studio'ya bas. Komutlar bu bilgisayardaki A-Center ile Studio arasında yerel bağlantıdan gider." },
+    { title: "5 · Roblox Studio bağlantısı", text: "Roblox Integration → Download Plugin; VexBridge.lua dosyasını Studio → Plugins → Plugins Folder içine koyup eski VexBridge kopyasını değiştir. Studio'yu yeniden başlat, localhost HTTP iznini ver. A-Center'da Connect to Studio, Studio araç çubuğunda VexBridge'e bas. Yeşil durum gerçek Studio yanıtını gösterir; Self-test bağlantı kurmaz." },
     { title: "6 · EVREN / NVIDIA ve ajan araçları", text: "API Providers → anahtarını kaydet, EVREN şartlarını okuyup onayla, sağlayıcıyı etkinleştir ve modelleri yenile. Model Center'dan model seç. AI Workspace'te Agent modu ve proje seçilirse doğrulanmış tool calling modelleri araç önerileri üretebilir. Öneriyi inceleyip onayla veya reddet; gerçek sonuçlarla ajanı devam ettir. Terminal için projenin terminal iznini ayrıca açmalısın. Bulut mesajları, ekler ve onaylı araç sonuçları sağlayıcıya gönderilir." },
     { title: "Sorun giderme", text: "D: taşıma cross-origin hatası verirse A-Center'ı güncel kurulum paketiyle yeniden kurup tekrar dene. Taşıma etkin indirme/runtime varken başlamaz. Hugging Face araması için internet gerekir. GGUF sohbeti için Vulkan destekli llama-cli.exe şarttır; yoksa Runtime Manager'daki gösterilen klasöre ekle. İndirme tamamlandı ama model çalışmıyorsa llama-cli sürümünü ve modelin My Models'daki dosya yolunu kontrol et." },
   ];
@@ -590,6 +590,7 @@ function WorkspaceView() {
     const initial=setTimeout(()=>{
     loadConvs().then(async (r) => {
       if (r.conversations?.[0]) { setCid(r.conversations[0].id); await loadConvs(r.conversations[0].id); const c = r.conversations[0]; setMode(c.mode); setSys(c.systemPrompt || ""); setTemp(c.temperature); setCtx(c.contextTokens); setModelId(c.modelId || ""); setPlanning(c.planningModel || ""); setCoding(c.codingModel || ""); setUtility(c.utilityModel || ""); setProjectId(c.providerData?.projectId||""); setThinking(c.providerData?.thinking); setEffort(c.providerData?.effort||""); setMaxTokens(c.providerData?.maxTokens||2048); }
+      else {const created=await api("/api/chat",{method:"POST",body:JSON.stringify({action:"create"})});setCid(created.conversation.id);await loadConvs(created.conversation.id);}
       const preferred=sessionStorage.getItem("acenter-selected-model"); if(preferred){setModelId(preferred);sessionStorage.removeItem("acenter-selected-model");}
       const taskText=sessionStorage.getItem("acenter-agent-task");
       if(taskText){sessionStorage.removeItem("acenter-agent-task");const task=JSON.parse(taskText);void api("/api/chat",{method:"POST",body:JSON.stringify({action:"create",mode:"agent",title:task.title,modelId:task.model||"",providerData:{taskId:task.id,projectId:task.projectId||""}})}).then(result=>{setCid(result.conversation.id);setMode("agent");setModelId(task.model||"");setProjectId(task.projectId||"");setPrompt(task.title);setMsgs([]);void loadConvs(result.conversation.id);});}
@@ -607,7 +608,7 @@ function WorkspaceView() {
   useEffect(()=>{
     if(!modelId.includes("::"))return;
     let active=true;const [provider,...parts]=modelId.split("::");
-    api("/api/providers",{method:"POST",body:JSON.stringify({provider,action:"model",model:parts.join("::")})}).then(r=>{if(active){setModels(ms=>ms.map(m=>m.name===modelId?{...m,...r.model,name:modelId}:m));setModelError("");}}).catch((e:any)=>{if(active)setModelError(e.message);});
+    api("/api/providers",{method:"POST",body:JSON.stringify({provider,action:"model",model:parts.join("::")})}).then(r=>{if(active){setModels(ms=>ms.map(m=>m.name===modelId?{...m,...r.model,name:modelId}:m));if(r.model.capabilities.maxOutput)setMaxTokens(n=>Math.min(n,r.model.capabilities.maxOutput));setModelError("");}}).catch((e:any)=>{if(active)setModelError(e.message);});
     return()=>{active=false;};
   },[modelId]);
   async function createConv() {
@@ -685,7 +686,7 @@ function WorkspaceView() {
                 {m.metadata?.usage&&<details className="text-[11px]"><summary>API kullanımı · {m.metadata.finishReason}</summary><pre className="vex-pre">{JSON.stringify(m.metadata.usage,null,2)}</pre></details>}
               </div>
             ))}
-            {msgs.length === 0 && <div className="text-[13px]" style={{ color: "#71717a" }}>{cid ? "No messages yet. Set your models on the right, then ask anything — inference stays on this machine." : "Create or select a conversation."}</div>}
+            {msgs.length === 0 && <div className="text-[13px]" style={{ color: "#71717a" }}>{cid ? "Sağdan model seçip mesajını yaz. Bulut seçiliyse mesaj sağlayıcıya gönderilir." : "Create or select a conversation."}</div>}
             <div ref={bottomRef} />
           </div>
           <input className="vex-input mb-2" placeholder="Optional: paste file/error context to attach" value={attach} onChange={(e) => setAttach(e.target.value)} />
@@ -698,7 +699,7 @@ function WorkspaceView() {
           <div className="font-semibold">Session config</div>
           <p className="text-[11px] text-zinc-400">{cloud?"Bulut seçili: mesaj ve onaylı araç sonuçları sağlayıcıya gönderilir.":"Yerel inference"}</p>
           <label style={{ color: "#A1A1AA" }} className="text-[12px]">Mode<select className="vex-input mt-1" value={mode} onChange={(e) => setMode(e.target.value)}><option value="chat">General chat</option><option value="code">Coding</option><option value="agent">Agent</option><option value="vision">Vision</option></select></label>
-          <label style={{ color: "#A1A1AA" }} className="text-[12px]">Primary model<select className="vex-input mt-1" value={modelId} onChange={(e) => setModelId(e.target.value)}><option value="">(auto by mode)</option>{models.map((m) => <option key={m.id} value={m.name}>{m.name} [{m.status}]</option>)}</select></label>
+          <label style={{ color: "#A1A1AA" }} className="text-[12px]">Primary model<select className="vex-input mt-1" value={modelId} onChange={(e) => setModelId(e.target.value)}><option value="">(auto by mode)</option>{models.map((m) => <option key={m.name} value={m.name}>{m.name} [{m.status}]</option>)}</select></label>
           <label style={{ color: "#A1A1AA" }} className="text-[12px]">Planning model<select className="vex-input mt-1" value={planning} onChange={(e) => setPlanning(e.target.value)}><option value="">—</option>{models.map((m) => <option key={m.id} value={m.name}>{m.name}</option>)}</select></label>
           <label style={{ color: "#A1A1AA" }} className="text-[12px]">Coding model<select className="vex-input mt-1" value={coding} onChange={(e) => setCoding(e.target.value)}><option value="">—</option>{models.map((m) => <option key={m.id} value={m.name}>{m.name}</option>)}</select></label>
           <label style={{ color: "#A1A1AA" }} className="text-[12px]">Utility model<select className="vex-input mt-1" value={utility} onChange={(e) => setUtility(e.target.value)}><option value="">—</option>{models.map((m) => <option key={m.id} value={m.name}>{m.name}</option>)}</select></label>
@@ -954,8 +955,9 @@ function RobloxView() {
   const [msg, setMsg] = useState("");
   const [cmd, setCmd] = useState("inspect");
   const [args, setArgs] = useState('{"service":"Workspace"}');
+  const [endpoint,setEndpoint]=useState("");
 
-  const load = useCallback(async () => { try { const r = await api("/api/roblox"); setBridge(r.bridge); } catch (e: any) { setMsg(e.message); } }, []);
+  const load = useCallback(async () => { try { const r = await api("/api/roblox"); setBridge(r.bridge);setEndpoint(r.endpoint);if(r.error)setMsg(r.error); } catch (e: any) { setMsg(e.message); } }, []);
   useEffect(() => { const initial = setTimeout(() => load(), 0); const t = setInterval(load, 4000); return () => { clearTimeout(initial); clearInterval(t); }; }, [load]);
   async function run(action: string, extra?: any) {
     setMsg("");
@@ -985,7 +987,7 @@ function RobloxView() {
       const url = URL.createObjectURL(await response.blob());
       const link = document.createElement("a");
       link.href = url;
-      link.download = "VexBridge.luau";
+      link.download = "VexBridge.lua";
       link.click();
       URL.revokeObjectURL(url);
     } catch (e: any) { setMsg(e.message); }
@@ -1000,16 +1002,17 @@ function RobloxView() {
           <div className="font-semibold mb-2">Connection</div>
           <div className="text-[13px] flex items-center gap-2"><StatusDot status={bridge?.status || "unknown"} /><b>{bridge?.status || "—"}</b><span style={{ color: "#71717a" }}>· last seen {timeAgo(bridge?.lastSeenAt)}</span></div>
           <div className="text-[12px] mt-1" style={{ color: "#A1A1AA" }}>Plugin v{bridge?.pluginVersion} · Bridge v{bridge?.bridgeVersion}</div>
+          <div className="text-[11px] vex-code mt-1">{endpoint}</div>
           <div className="text-[12px] mt-1 vex-code" style={{ color: "#A1A1AA" }}>token: {(bridge?.token || "").slice(0, 18)}… <button className="vex-btn-ghost ml-1" style={{ padding: "1px 8px", fontSize: 11 }} onClick={() => { navigator.clipboard?.writeText(bridge?.token || ""); setMsg("Token copied."); }}>copy</button></div>
           <div className="flex flex-wrap gap-2 mt-3">
-            <button className="vex-btn" onClick={downloadPlugin}>Download Plugin (.luau)</button>
+            <button className="vex-btn" onClick={downloadPlugin}>Download Plugin (.lua)</button>
             <button className="vex-btn" onClick={() => run("connect")}>Connect to Studio</button>
             <button className="vex-btn-ghost" onClick={() => run("simulate-studio", { token: bridge?.token })}>Self-test handshake</button>
             <button className="vex-btn-ghost" onClick={() => run("check-install")}>Check Installation</button>
             <button className="vex-btn-ghost" onClick={() => run("regenerate-token")}>New token</button>
             <button className="vex-btn-danger" onClick={() => run("disconnect")}>Disconnect</button>
           </div>
-          <div className="text-[11px] mt-2" style={{ color: "#71717a" }}>Install: copy VexBridge.luau to %LOCALAPPDATA%/Roblox/Plugins/ (manual). Vex never overwrites an existing plugin silently — compare first.</div>
+          <div className="text-[12px] mt-2" style={{ color: "#A1A1AA" }}>Güncel eklentiyi indir. Studio → Plugins → Plugins Folder içindeki eski VexBridge kopyasını değiştir, Studio’yu yeniden başlat. A-Center’da Connect to Studio, ardından Studio araç çubuğunda VexBridge’e bas ve localhost HTTP iznini ver. Yeşil durum yalnız gerçek Studio yanıtından sonra görünür. Self-test Studio bağlantısı kurmaz.</div>
         </div>
         <div className="vex-panel p-3">
           <div className="font-semibold mb-2">Send Studio command</div>
@@ -1278,7 +1281,7 @@ function SettingsView() {
         {row("chat.defaultCtx", "Default context tokens")}
         {row("terminal.defaultCwd", "Terminal default cwd")}
         {row("terminal.allowDangerous", "Allow dangerous commands (still needs per-command approval)", "select", ["0", "1"])}
-        {row("roblox.port", "Roblox bridge port")}
+        <p className="text-[12px] text-zinc-400">Roblox masaüstü köprüsü: 127.0.0.1:7817 (sabit port)</p>
         {row("updates.check", "Check for runtime/plugin updates", "select", ["1", "0"])}
         <button className="vex-btn" onClick={save} disabled={saving}>{saving ? "Saving…" : "Save settings"}</button>
       </div>

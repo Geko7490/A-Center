@@ -1,12 +1,16 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
 type API=(path:string,init?:RequestInit)=>Promise<any>;
-export default function AIProviders({api}:{api:API}) {
+export default function AIProviders({api,select}:{api:API;select:(model:string)=>void}) {
   const [data,setData]=useState<any>({providers:[],usage:[]});const [keys,setKeys]=useState<Record<string,string>>({});const [msg,setMsg]=useState("");const [busy,setBusy]=useState(false);const [terms,setTerms]=useState<any>(null);const [consent,setConsent]=useState(false);const [quota,setQuota]=useState<any>(null);
   const load=useCallback(async()=>{try{setData(await api("/api/providers"));}catch(e:any){setMsg(e.message);}},[api]);
   useEffect(()=>{const t=setTimeout(()=>void load(),0);return()=>clearTimeout(t);},[load]);
   async function act(provider:string,action:string,extra:object={}){
     setBusy(true);setMsg("");try{const r=await api("/api/providers",{method:"POST",body:JSON.stringify({provider,action,...extra})});if(action==="save-key")setKeys(k=>({...k,[provider]:""}));if(r.termsRequired||action==="terms"){setTerms(r);setConsent(false);}else if(action==="accept-terms")setTerms(null);if(action==="quota")setQuota(r);setMsg(r.note||"İşlem tamamlandı.");await load();}catch(e:any){setMsg(e.message);}finally{setBusy(false);}
+  }
+  async function openWorkspace(p:any){
+    setBusy(true);setMsg("");
+    try{await api("/api/providers",{method:"POST",body:JSON.stringify({provider:p.id,action:"config",...p.config,enabled:true})});await api("/api/providers",{method:"POST",body:JSON.stringify({provider:p.id,action:"model",model:p.config.defaultModel})});select(`${p.id}::${p.config.defaultModel}`);}catch(e:any){setMsg(e.message);await load();}finally{setBusy(false);}
   }
   return <div><h1 className="text-xl font-bold mb-2">API Providers</h1><p className="text-[13px] mb-3 text-zinc-400">Bulut modeline gönderdiğin mesajlar, ekler ve onayladığın araç sonuçları seçilen sağlayıcıya iletilir. Yerel modeller bilgisayarında çalışmaya devam eder.</p>
     {msg&&<div className="vex-panel p-3 mb-3 whitespace-pre-wrap">{msg}</div>}
@@ -18,6 +22,7 @@ export default function AIProviders({api}:{api:API}) {
       <label className="text-[13px] flex gap-2"><input type="checkbox" checked={p.config.enabled} disabled={busy} onChange={e=>act(p.id,"config",{...p.config,enabled:e.target.checked})}/>Sağlayıcı etkin</label>
       <label className="block text-[12px]">Varsayılan model<select className="vex-input mt-1" value={p.config.defaultModel} disabled={busy} onChange={e=>act(p.id,"config",{...p.config,defaultModel:e.target.value})}><option value="">Seç…</option>{p.catalog.models.map((m:any)=><option key={m.id}>{m.id}</option>)}</select></label>
       <p className="text-[11px] text-zinc-400">Varsayılan model seçiliyse bağlantı testi kısa bir model isteği yapar; gerçek kullanım kayıtlarına eklenir.</p>
+      <button className="vex-btn" disabled={busy||!p.keyConfigured||!p.config.defaultModel} onClick={()=>openWorkspace(p)}>Workspace’te kullan</button>
       {p.id==="evren"&&<label className="block text-[12px]">API modu<select className="vex-input mt-1" value={p.config.mode} onChange={e=>act(p.id,"config",{...p.config,mode:e.target.value})}><option value="chat">Chat Completions</option><option value="responses">Responses (yanıt zinciri)</option></select></label>}
       <div className="flex gap-2 flex-wrap"><button className="vex-btn-ghost" disabled={busy||!p.keyConfigured} onClick={()=>act(p.id,"test")}>Bağlantıyı test et</button><button className="vex-btn-ghost" disabled={busy||!p.keyConfigured} onClick={()=>act(p.id,"refresh")}>Modelleri yenile</button><button className="vex-btn-ghost" disabled={busy||!p.keyConfigured} onClick={()=>act(p.id,"quota",{model:p.config.defaultModel})}>Kota ve kullanım</button>{p.id==="evren"&&<button className="vex-btn-ghost" disabled={busy||!p.keyConfigured} onClick={()=>act(p.id,"terms")}>Kullanım şartları</button>}</div>
       {p.id==="nvidia"&&<p className="text-[11px] text-zinc-400">Katalog erişimi, modelin hesabınla yanıt üretebildiğini kanıtlamaz. Kota endpoint’i belgelenmediği için NVIDIA kotası tahmin edilmez.</p>}

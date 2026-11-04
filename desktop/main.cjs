@@ -10,6 +10,7 @@ let mainWindow;
 let localToken;
 let serverUrl;
 let credentialBridge;
+let robloxBridge;
 
 function findPort() {
   return new Promise((resolve, reject) => {
@@ -49,6 +50,9 @@ async function waitForReady(url, child) {
 
 async function startLocalServer() {
   const port = await findPort();
+  let robloxError = "";
+  try { robloxBridge = await require("./roblox-bridge.cjs").createRobloxBridge(`http://127.0.0.1:${port}`); }
+  catch (error) { robloxError = `Studio bridge port 7817 unavailable (${error.code || "listen failed"}). Close the other A-Center instance or application using this port, then restart.`; }
   const entry = appServerEntry();
   const args = [entry, app.isPackaged ? "start" : "dev", "--hostname", "127.0.0.1", "--port", String(port)];
   localToken = crypto.randomBytes(32).toString("hex");
@@ -74,6 +78,8 @@ async function startLocalServer() {
       HOSTNAME: "127.0.0.1",
       PORT: String(port),
       VEX_LOCAL_TOKEN: localToken,
+      VEX_ROBLOX_PORT: "7817",
+      VEX_ROBLOX_ERROR: robloxError,
       VEX_CREDENTIAL_URL: credentialBridge.url,
       VEX_CREDENTIAL_TOKEN: credentialBridge.token,
       VEX_STORAGE: storageRoot,
@@ -159,6 +165,7 @@ app.on("activate", () => {
 
 app.on("before-quit", () => {
   credentialBridge?.close();
+  robloxBridge?.close();
   if (serverProcess && serverProcess.exitCode === null) serverProcess.kill();
 });
 

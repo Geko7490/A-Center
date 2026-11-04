@@ -49,6 +49,12 @@ test("Idle streams fail with a timeout, not successful completion",async()=>{
 test("Authentication, access, model, parameter and capacity failures remain distinct",async()=>{
  for(const [status,code] of [[401,"invalid_api_key"],[403,"access_denied"],[404,"model_not_found"],[400,"unsupported_parameter"],[503,"capacity_full"]] as const){await withServer((req,res)=>{res.writeHead(status,{"retry-after":"60"});res.end('{}');},async(base)=>{await assert.rejects(new OpenAICompatibleProvider("nvidia","key",base).models(),(e:ProviderError)=>e.code===code&&e.status===status);});}
 });
+test("JSON Responses output is accepted when a provider answers a streaming request with JSON",async()=>{
+ await withServer((req,res)=>{res.setHeader("content-type","application/json");res.end(JSON.stringify({id:"resp-json",status:"completed",output:[{type:"message",content:[{type:"output_text",text:"OK"}]}],usage:{output_tokens:2}}));},async(base)=>{
+  const events=[];for await(const e of new OpenAICompatibleProvider("evren","mock-key",base).generate({...input(),mode:"responses"}))events.push(e);
+  assert.equal(events.find(e=>e.type==="text")?.text,"OK");assert.equal(events.find(e=>e.type==="response_id")?.id,"resp-json");assert.equal(events.find(e=>e.type==="finish")?.reason,"stop");
+ });
+});
 test("Upgrade from 0.1.1 preserves existing conversations and messages",async()=>{
  const temp=fs.mkdtempSync(path.join(os.tmpdir(),"acenter-upgrade-"));const old=path.join(temp,"old-migrations");fs.mkdirSync(path.join(old,"meta"),{recursive:true});const journal=JSON.parse(fs.readFileSync("drizzle/meta/_journal.json","utf8"));fs.writeFileSync(path.join(old,"meta","_journal.json"),JSON.stringify({...journal,entries:journal.entries.filter((e:any)=>e.idx<=1)}));for(const entry of journal.entries.filter((e:any)=>e.idx<=1))fs.copyFileSync(path.join("drizzle",entry.tag+".sql"),path.join(old,entry.tag+".sql"));
  const {PGlite}=await import("@electric-sql/pglite");const {drizzle}=await import("drizzle-orm/pglite");const {migrate}=await import("drizzle-orm/pglite/migrator");const client=new PGlite(path.join(temp,"db"));
@@ -92,6 +98,29 @@ test("Agent file edits use real project permissions; tool approvals cannot execu
     const proposed=(await db.select().from(schema.aiToolCalls).where(eq(schema.aiToolCalls.conversationId,agent.id)))[0];assert.equal(proposed.projectId,project.id);
     assert.equal((await POST(new NextRequest("http://127.0.0.1/api/ai/tools",{method:"POST",body:JSON.stringify({id:proposed.id,decision:"approve"})}))).status,200);assert.equal(fs.readFileSync(path.join(root,"agent.txt"),"utf8"),"real edit");
     const current=(await db.select().from(schema.conversations).where(eq(schema.conversations.id,agent.id)))[0];const next=await cloudChat(new Request("http://127.0.0.1/api/chat"),current,{continue:true},"evren::mock");const second=[];for await(const frame of parseSSE(next.body!,new AbortController().signal))second.push(JSON.parse(frame.data));assert(second.some(e=>e.type==="done"&&e.message.content==="Edit confirmed"));assert.equal((await db.select().from(schema.aiUsage)).length,3);
+    // Reproduce a model whose connection test works at 64 tokens, but whose default Workspace budget used to exceed its output limit.
+    const [chat]=await db.insert(schema.conversations).values({modelId:"evren::mock"}).returning();
+    aiManager.resolve=async()=>({...info,capabilities:{...info.capabilities,maxOutput:128}});
+    const {POST:chatAction}=await import("../src/app/api/chat/route");
+    const response=await chatAction(new NextRequest("http://127.0.0.1/api/chat",{method:"POST",body:JSON.stringify({conversationId:chat.id,modelId:"evren::mock",prompt:"hi",maxTokens:2048})}));
+    const frames=[];for await(const frame of parseSSE(response.body!,new AbortController().signal))frames.push(JSON.parse(frame.data));assert(frames.some(e=>e.type==="done"&&e.message.content==="OK"),JSON.stringify(frames));
+   });
+   // The real EVREN contract: `auto` generates successfully but cannot count input tokens.
+   // Use the real manager and chat route so the probe-to-Workspace path cannot hide this regression.
+   aiManager.resolve=resolve;let counts=0,responses=0;
+   const {writeValue}=await import("../src/lib/ai/store");await writeValue("ai.provider.evren",{enabled:true,mode:"responses",defaultModel:"auto"});
+   await withServer(async(req,res)=>{
+    if(req.url==="/terms/status"){res.end('{"accepted":true}');return;}
+    if(req.url==="/models"){res.end(JSON.stringify({data:[{id:"auto",task:"chat",context_length:32768}]}));return;}
+    if(req.url==="/models/auto"){res.end(JSON.stringify({id:"auto",task:"chat",context_length:32768}));return;}
+    if(req.url==="/responses/input_tokens"){counts++;res.writeHead(400);res.end('{"error":{"code":"invalid_model","message":"auto cannot count tokens"}}');return;}
+    assert.equal(req.url,"/responses");responses++;res.writeHead(200,{"content-type":"text/event-stream"});res.end(event({type:"response.completed",response:{id:`resp-${responses}`,output:[{type:"message",content:[{type:"output_text",text:"OK"}]}]}}));
+   },async(base)=>{
+    aiManager.client=async()=>new OpenAICompatibleProvider("evren","mock-key",base);
+    const probe=await providerAction(new NextRequest("http://127.0.0.1/api/providers",{method:"POST",body:JSON.stringify({provider:"evren",action:"test"})}));assert.equal(probe.status,200);
+    const [auto]=await db.insert(schema.conversations).values({modelId:"evren::@default"}).returning();
+    const {POST:chatAction}=await import("../src/app/api/chat/route");const response=await chatAction(new NextRequest("http://127.0.0.1/api/chat",{method:"POST",body:JSON.stringify({conversationId:auto.id,prompt:"hi"})}));
+    const frames=[];for await(const frame of parseSSE(response.body!,new AbortController().signal))frames.push(JSON.parse(frame.data));assert(frames.some(e=>e.type==="done"&&e.message.content==="OK"),JSON.stringify(frames));assert.equal(counts,0);assert.equal(responses,2);
    });
   }finally{aiManager.resolve=resolve;aiManager.client=makeClient;}
   await client?.close();

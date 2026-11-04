@@ -35,7 +35,7 @@ export async function POST(req:NextRequest) {
         if(!model)throw new ProviderError("Default model not found","model_not_found",404);
         if(id==="evren"&&!["chat","vision_chat"].includes(model.task))throw new ProviderError("Choose a chat model for the connection test","unsupported_task",400);
         let output="",reasoning=false,finish="";let usage;
-        for await(const event of client.generate({model,messages:[{role:"user",content:"Reply briefly with OK."}],maxTokens:Math.min(64,model.capabilities.maxOutput||64),thinking:model.capabilities.thinking?false:undefined,signal:req.signal})){
+        for await(const event of client.generate({model,messages:[{role:"user",content:"Reply briefly with OK."}],mode:config.mode,maxTokens:Math.min(64,model.capabilities.maxOutput||64),thinking:model.capabilities.thinking?false:undefined,signal:req.signal})){
           if(event.type==="text")output+=event.text||"";
           if(event.type==="reasoning"&&event.text)reasoning=true;
           if(event.type==="finish")finish=event.reason||"";
@@ -44,7 +44,7 @@ export async function POST(req:NextRequest) {
         if(!finish||(!output.trim()&&!reasoning))throw new ProviderError("Provider returned no generated content","empty_response",502);
         if(usage)await trackUsage(id,model.id,usage,crypto.randomUUID());
         const verified={status:"generation_verified",at:new Date().toISOString(),generationVerified:true,model:model.id};await writeValue(`ai.health.${id}`,verified);
-        return NextResponse.json({models,health:verified,note:`Kimlik doğrulamalı gerçek model yanıtı alındı: ${model.id}.`,probe:{output:output.slice(0,500),reasoningReturned:reasoning,finishReason:finish,usage:usage||null}});
+        return NextResponse.json({models,health:verified,note:`Gerçek model yanıtı alındı: ${model.id} (${config.mode}). ${config.enabled?"Workspace’te kullan düğmesiyle sohbeti açabilirsin.":"Sağlayıcı şu anda kapalı; sohbet için Workspace’te kullan düğmesine bas."}`,probe:{output:output.slice(0,500),reasoningReturned:reasoning,finishReason:finish,usage:usage||null}});
       }
       return NextResponse.json({models,health,terms,note:id==="nvidia"?"Public catalog retrieved. Account/model generation access is verified only by a successful chat request.":"Authenticated catalog retrieved; no generation test performed."});
     }

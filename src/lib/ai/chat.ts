@@ -51,17 +51,19 @@ export async function cloudChat(req:Request,conv:typeof conversations.$inferSele
             }else if(m.role==="user")wire.push({role:"user",content:meta.images?.length&&info.capabilities.vision===true?[{type:"text",text:m.content},...meta.images.map((url:string)=>({type:"image_url",image_url:{url}}))]:m.content});
           }
           const tools=conv.mode==="agent"&&info.capabilities.tools===true&&conv.providerData.projectId?AGENT_TOOLS:undefined;
-          const maxTokens=Math.max(1,Math.min(131072,Number(b.maxTokens)||Number(conv.providerData.maxTokens)||2048));
+          const maxTokens=Math.max(1,Math.min(info.capabilities.maxOutput||131072,Number(b.maxTokens)||Number(conv.providerData.maxTokens)||2048));
           // Guard pathological histories without silently losing conversation or tool messages.
           if(JSON.stringify(wire).length>2*1024*1024)throw new ProviderError("Conversation is too large; start a new chat or reduce attached context","context_limit",400);
-          if(provider==="evren"&&info.capabilities.contextLength){const count=await api.json("/responses/input_tokens",{model:modelId,input:responseInput(wire.filter(m=>m.role!=="system")),instructions:system,tools:tools?.map(t=>({type:"function",...t.function}))},abort.signal);if(typeof count.input_tokens==="number"&&count.input_tokens+maxTokens>info.capabilities.contextLength)throw new ProviderError(`Input ${count.input_tokens} + output budget ${maxTokens} exceeds context ${info.capabilities.contextLength}`,"context_limit",400);}
+          // EVREN's auto router supports generation but explicitly rejects token counting.
+          // Chat Completions applies its own context validation; do not gate it on Responses.
+          if(provider==="evren"&&modelId!=="auto"&&settings.mode==="responses"&&info.capabilities.contextLength){const count=await api.json("/responses/input_tokens",{model:modelId,input:responseInput(wire.filter(m=>m.role!=="system")),instructions:system,tools:tools?.map(t=>({type:"function",...t.function}))},abort.signal);if(typeof count.input_tokens==="number"&&count.input_tokens+maxTokens>info.capabilities.contextLength)throw new ProviderError(`Input ${count.input_tokens} + output budget ${maxTokens} exceeds context ${info.capabilities.contextLength}`,"context_limit",400);}
           const chain=conv.providerData.chain;
           const chainValid=settings.mode==="responses"&&chain?.provider===provider&&chain?.model===modelId&&chain?.messageCount<=history.length;
           const input=chainValid?[wire[0],...wire.slice(1+chain.messageCount)]:wire;
           send({type:"status",status:"connecting"});
           const effortSupported=info.capabilities.parameters?.includes("reasoning_effort")||info.capabilities.reasoningStyle==="effort";
           const savedEffort=effortSupported&&(!info.capabilities.effortValues||info.capabilities.effortValues.includes(conv.providerData.effort))?conv.providerData.effort:undefined;
-          for await(const event of api.generate({model:info,messages:input,fullMessages:wire,tools,maxTokens,temperature:conv.temperature,thinking:info.capabilities.thinking?(typeof b.thinking==="boolean"?b.thinking:conv.providerData.thinking):undefined,effort:typeof b.effort==="string"?b.effort:savedEffort,mode:settings.mode,previousResponseId:chainValid?chain.responseId:undefined,signal:abort.signal})){
+          for await(const event of api.generate({model:info,messages:input,fullMessages:wire,tools,maxTokens,temperature:conv.temperature,thinking:info.capabilities.thinking?(typeof b.thinking==="boolean"?b.thinking:conv.providerData.thinking):undefined,effort:effortSupported&&typeof b.effort==="string"&&b.effort?b.effort:savedEffort,mode:settings.mode,previousResponseId:chainValid?chain.responseId:undefined,signal:abort.signal})){
             if(event.type==="text"){text+=event.text||"";send({type:"status",status:"generating"});}
             if(event.type==="reasoning"){reasoning+=event.text||"";send({type:"status",status:"thinking"});}
             if(text.length+reasoning.length>4*1024*1024)throw new ProviderError("Response exceeded application size limit","output_limit");
