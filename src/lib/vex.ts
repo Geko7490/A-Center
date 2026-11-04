@@ -4,6 +4,8 @@ import os from "node:os";
 import crypto from "node:crypto";
 import { execSync, exec } from "node:child_process";
 import { generateLlama } from "./llama";
+import { ProbeCache } from './cache';
+import type { LlamaOptions,LocalMetrics } from './llama-server';
 
 export const STORAGE_ROOT =
   process.env.VEX_STORAGE || path.join(process.cwd(), ".vex-storage");
@@ -194,21 +196,25 @@ export function estimateModelMemory(sizeBytes: number, contextTokens: number, qu
   return { modelMem, kvCache, overhead, total, note: "Heuristic estimate (model file + KV cache + runtime overhead). Not a benchmark." };
 }
 
-export async function checkOllama(): Promise<{ available: boolean; models: string[]; version?: string; error?: string }> {
+type OllamaStatus={ available: boolean; models: string[]; version?: string; error?: string };
+const probeState=globalThis as typeof globalThis & {aCenterOllamaCache?:ProbeCache<OllamaStatus>};
+const ollamaCache=probeState.aCenterOllamaCache ||= new ProbeCache<OllamaStatus>(10000,3000);
+export async function checkOllama(force=false): Promise<OllamaStatus> {
+ return ollamaCache.get('localhost',async()=>{
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), 3000);
   try {
-    const ctrl = new AbortController();
-    const t = setTimeout(() => ctrl.abort(), 3000);
     const res = await fetch("http://127.0.0.1:11434/api/tags", { signal: ctrl.signal });
-    clearTimeout(t);
     if (!res.ok) return { available: false, models: [], error: `HTTP ${res.status}` };
     const j = (await res.json()) as { models?: { name: string }[] };
     return { available: true, models: (j.models || []).map((m) => m.name) };
   } catch (e: unknown) {
     return { available: false, models: [], error: e instanceof Error ? e.message : "unreachable" };
-  }
+  }finally{clearTimeout(t);}
+ },force);
 }
 
-export async function ollamaGenerate(model: string, prompt: string, system?: string, opts?: { temperature?: number; num_ctx?: number; signal?:AbortSignal }): Promise<{ text: string; ms: number; tps: number }> {
+export async function ollamaGenerate(model: string, prompt: string, system?: string, opts?: { temperature?: number; num_ctx?: number; signal?:AbortSignal }) {
   const started = Date.now();
   const res = await fetch("http://127.0.0.1:11434/api/generate", {
     method: "POST",
@@ -217,14 +223,13 @@ export async function ollamaGenerate(model: string, prompt: string, system?: str
     body: JSON.stringify({ model, prompt, system: system || "", stream: false, options: { temperature: opts?.temperature ?? 0.7, num_ctx: opts?.num_ctx ?? 4096 } }),
   });
   if (!res.ok) throw new Error(`Ollama error HTTP ${res.status}: ${await res.text().then((t) => t.slice(0, 500))}`);
-  const j = (await res.json()) as { response?: string; eval_count?: number; eval_duration?: number };
+  const j = (await res.json()) as { response?: string; eval_count?: number; eval_duration?: number;prompt_eval_count?:number;prompt_eval_duration?:number;load_duration?:number };
   const ms = Date.now() - started;
-  const toks = j.eval_count || Math.ceil((j.response || "").length / 4);
-  const tps = ms > 0 ? Math.round((toks / ms) * 1000) : 0;
-  return { text: j.response || "", ms, tps };
+  const metrics:LocalMetrics={promptTokens:j.prompt_eval_count??null,generationTokens:j.eval_count??null,cachedTokens:null,promptMs:j.prompt_eval_duration===undefined?null:j.prompt_eval_duration/1e6,generationMs:j.eval_duration===undefined?null:j.eval_duration/1e6,promptTokPerSec:j.prompt_eval_count!==undefined&&j.prompt_eval_duration?j.prompt_eval_count*1e9/j.prompt_eval_duration:null,generationTokPerSec:j.eval_count!==undefined&&j.eval_duration?j.eval_count*1e9/j.eval_duration:null,ttftMs:null,requestTtftMs:null,loadMs:(j.load_duration||0)/1e6,totalMs:ms,serverReused:false,workerPid:null,device:'Ollama (backend unknown)',offloadedLayers:null,totalLayers:null};
+  return { text: j.response || "", ms, tps:metrics.generationTokPerSec||0,metrics };
 }
 
-export async function llamaCppGenerate(modelPath: string, prompt: string, system: string, opts?: { temperature?: number; contextTokens?: number; cpuThreads?: number; gpuLayers?: number | string; signal?:AbortSignal }) {
+export async function llamaCppGenerate(modelPath: string, prompt: string, system: string, opts?: LlamaOptions) {
   return generateLlama(path.join(RUNTIMES_DIR, "llama.cpp"), modelPath, prompt, system, opts || {});
 }
 

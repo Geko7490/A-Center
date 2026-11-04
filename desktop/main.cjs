@@ -78,6 +78,7 @@ async function startLocalServer() {
       HOSTNAME: "127.0.0.1",
       PORT: String(port),
       VEX_LOCAL_TOKEN: localToken,
+      VEX_LLAMA_SUPERVISOR: path.join(app.isPackaged ? app.getAppPath() : path.resolve(__dirname, '..'), 'desktop', 'llama-supervisor.cjs'),
       VEX_ROBLOX_PORT: "7817",
       VEX_ROBLOX_ERROR: robloxError,
       VEX_CREDENTIAL_URL: credentialBridge.url,

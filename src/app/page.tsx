@@ -95,7 +95,7 @@ export default function VexApp() {
             <div style={{ width: 30, height: 30, borderRadius: 6, background: "linear-gradient(135deg,#A855F7,#6D28D9)", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 16 }}>V</div>
             <div>
               <div className="font-bold text-[15px] leading-tight">Vex AI Center</div>
-              <div className="text-[11px]" style={{ color: "#A1A1AA" }}>AI Platform · v0.2.1</div>
+              <div className="text-[11px]" style={{ color: "#A1A1AA" }}>AI Platform · v0.3.0</div>
             </div>
           </div>
           <div className="mt-3 flex items-center gap-2 text-[11px]" style={{ color: "#A1A1AA" }}>
@@ -147,11 +147,11 @@ function TutorialView({ go }: { go: (n: NavKey) => void }) {
   const sections = [
     { title: "1 · Depolama yerini D: sürücüsüne taşı", text: "Settings → D: drive → Save settings. A-Center D:\\A-Center\models, downloads, workspace, runtimes ve diğer klasörleri oluşturur; mevcut dosyaları kopyalar ve yeniden başlar. Kaynak dosyalar yedek olarak korunur; yeni konumu doğruladıktan sonra eski model dosyalarını silebilirsin. Taşıma sırasında indirmeleri iptal et, runtime'ları durdur ve D: sürücüsünde model boyutundan fazla boş alan bırak. PGlite veritabanı küçük kaldığı için kullanıcı profilindeki C: konumunda kalır." },
     { title: "2 · Hugging Face'ten model bul ve indir", text: "Model Store'da Hugging Face kaynağını seçip model adıyla ara. Belirli bir repo için owner/name veya Hugging Face URL'sini repo kutusuna yapıştır, Load repository files'e bas. GGUF dosyaları boyut ve quant etiketiyle görünür; istediğinin Download düğmesine bas. İndirme tamamlanınca dosya My Models'a eklenir." },
-    { title: "3 · Bu laptopta Luau Devstral çalıştır", text: "Model Store'daki RX 6700M hızlı seçeneği Luau Devstral Q2_K dosyasını indirir. Bu yaklaşık 8.89 GB ağırlığındadır. Settings değil, Runtime Manager → Apply hybrid profile ile 8 CPU thread, auto VRAM layers ve 4K context ayarla. Vulkan destekli Windows llama.cpp paketindeki llama-cli.exe ve yan DLL'leri ekrandaki llama.cpp runtime klasörüne koy; sonra AI Workspace'te modeli seç." },
+    { title: "3 · Bu laptopta Luau Devstral çalıştır", text: "Model Store'daki RX 6700M hızlı seçeneği Luau Devstral Q2_K dosyasını indirir. Bu yaklaşık 8.89 GB ağırlığındadır. Settings değil, Runtime Manager → Apply hybrid profile ile 8 CPU thread, auto VRAM layers ve 4K context ayarla. Vulkan destekli Windows llama.cpp paketindeki llama-server.exe ve yan DLL'leri ekrandaki llama.cpp runtime klasörüne koy; sonra AI Workspace'te modeli seç." },
     { title: "4 · Hibrit çalışma ne yapar?", text: "llama.cpp --n-gpu-layers auto ve --fit on ile GPU belleğine sığan katmanları RX 6700M'e, kalanını 32 GB sistem belleği ve Ryzen 7 5800H işlemciye bırakır. Modelin tamamı VRAM'e sığmak zorunda değildir; CPU/RAM desteği hızın düşmesine yol açabilir. GPU layers alanında auto önerilir. Bağlamı 4K'dan başlat; bellek veya hız sorunu olursa 2K'ya indir." },
     { title: "5 · Roblox Studio bağlantısı", text: "Roblox Integration → Download Plugin; VexBridge.lua dosyasını Studio → Plugins → Plugins Folder içine koyup eski VexBridge kopyasını değiştir. Studio'yu yeniden başlat, localhost HTTP iznini ver. A-Center'da Connect to Studio, Studio araç çubuğunda VexBridge'e bas. Yeşil durum gerçek Studio yanıtını gösterir; Self-test bağlantı kurmaz." },
     { title: "6 · EVREN / NVIDIA ve ajan araçları", text: "API Providers → anahtarını kaydet, EVREN şartlarını okuyup onayla, sağlayıcıyı etkinleştir ve modelleri yenile. Model Center'dan model seç. AI Workspace'te Agent modu ve proje seçilirse doğrulanmış tool calling modelleri araç önerileri üretebilir. Öneriyi inceleyip onayla veya reddet; gerçek sonuçlarla ajanı devam ettir. Terminal için projenin terminal iznini ayrıca açmalısın. Bulut mesajları, ekler ve onaylı araç sonuçları sağlayıcıya gönderilir." },
-    { title: "Sorun giderme", text: "D: taşıma cross-origin hatası verirse A-Center'ı güncel kurulum paketiyle yeniden kurup tekrar dene. Taşıma etkin indirme/runtime varken başlamaz. Hugging Face araması için internet gerekir. GGUF sohbeti için Vulkan destekli llama-cli.exe şarttır; yoksa Runtime Manager'daki gösterilen klasöre ekle. İndirme tamamlandı ama model çalışmıyorsa llama-cli sürümünü ve modelin My Models'daki dosya yolunu kontrol et." },
+    { title: "Sorun giderme", text: "D: taşıma cross-origin hatası verirse A-Center'ı güncel kurulum paketiyle yeniden kurup tekrar dene. Taşıma etkin indirme/runtime varken başlamaz. Hugging Face araması için internet gerekir. GGUF sohbeti için Vulkan destekli llama-server.exe şarttır; yoksa Runtime Manager'daki gösterilen klasöre ekle. İndirme tamamlandı ama model çalışmıyorsa llama-cli sürümünü ve modelin My Models'daki dosya yolunu kontrol et." },
   ];
   return <div>
     <h1 className="text-xl font-bold mb-1">A-Center kullanım rehberi</h1>
@@ -492,13 +492,15 @@ function ModelsView() {
 
 /* ================= RUNTIMES ================= */
 function RuntimesView() {
+  const [devices,setDevices]=useState<any[]>([]);
+  const [server,setServer]=useState<any>(null);
   const [runtimes, setRuntimes] = useState<any[]>([]);
   const [ollama, setOllama] = useState<any>(null);
   const [msg, setMsg] = useState("");
   const [cfg, setCfg] = useState<Record<string, any>>({});
 
-  const load = useCallback(async () => {
-    try { const r = await api("/api/runtimes"); setRuntimes(r.runtimes || []); setOllama(r.ollama); } catch (e: any) { setMsg(e.message); }
+  const load = useCallback(async (refresh=false) => {
+    try { const r = await api(`/api/runtimes${refresh?'?refresh=1':''}`); setRuntimes(r.runtimes || []); setOllama(r.ollama);setDevices(r.devices||[]);setServer(r.server); } catch (e: any) { setMsg(e.message); }
   }, []);
   useEffect(() => { const initial = setTimeout(() => load(), 0); return () => clearTimeout(initial); }, [load]);
   async function act(name: string, action: string, extra?: any) {
@@ -507,16 +509,17 @@ function RuntimesView() {
     catch (e: any) { setMsg(e.message); }
   }
   async function applyHybridPreset() {
-    const config = { cpuThreads: 8, gpuLayers: "auto", ctxSize: 4096 };
+    const config = { cpuThreads: 8, gpuLayers: "auto", ctxSize: 4096,device:devices.find(d=>/RX\s*6700M/i.test(d.name))?.id||'auto',fitTargetMiB:1024,cacheRamMiB:1024 };
     setCfg((current) => ({ ...current, "llama.cpp": config }));
     await act("llama.cpp", "config", { config });
     setMsg("RX 6700M + 32 GB RAM profile saved: 8 CPU threads, automatic VRAM fit, 4K context.");
   }
   return (
     <div>
-      <div className="flex items-center justify-between mb-1"><h1 className="text-xl font-bold">Runtime Manager</h1><button className="vex-btn-ghost" onClick={load}>Re-detect</button></div>
+      <div className="flex items-center justify-between mb-1"><h1 className="text-xl font-bold">Runtime Manager</h1><button className="vex-btn-ghost" onClick={()=>load(true)}>Re-detect</button></div>
       <p className="text-[13px] mb-3" style={{ color: "#A1A1AA" }}>Modular adapters: llama.cpp · Ollama · ONNX · Transformers. Auto-selection inspects format → hardware → memory before loading. CUDA never required.</p>
-      <div className="vex-panel p-3 mb-3 text-[12px]" style={{ color: "#A1A1AA" }}>RX 6700M + 32 GB RAM: llama.cpp hybrid mode uses GPU layers that fit VRAM and keeps remaining layers in system RAM/CPU. Select a GGUF model in AI Workspace; install a Vulkan-enabled llama-cli.exe into the llama.cpp runtime folder first. <button className="vex-btn-ghost mt-2" onClick={applyHybridPreset}>Apply hybrid profile (8 threads · auto VRAM · 4K)</button></div>
+      <div className="vex-panel p-3 mb-3 text-[12px]" style={{ color: "#A1A1AA" }}>GGUF modelleri kalıcı llama-server ile bellekte kalır. Tam Vulkan derlemesinin llama-server.exe ve DLL dosyalarını runtime klasörüne koy. RX 6700M profili GPU belleğinde 1 GB pay bırakır; kalan katmanlar RAM/CPU kullanır. <button className="vex-btn-ghost mt-2" onClick={applyHybridPreset}>Apply hybrid profile (8 threads · RX 6700M · auto VRAM · 4K)</button></div>
+      <div className="vex-panel p-3 mb-3 text-[12px]">Sunucu: {server?.ready?'Model bellekte':server?.running?'Yükleniyor':'Kapalı'} · GPU: {server?.device||'—'} · Offload: {server?.offloadedLayers??'?'} / {server?.totalLayers??'?'} katman · PID: {server?.workerPid||'—'}{server?.ready&&<button className="vex-btn-danger ml-2" onClick={()=>act('llama.cpp','stop')}>Modeli bellekten çıkar</button>}{server?.logFile&&<div className="vex-code">Gerçek yükleme kaydı: {server.logFile}</div>}</div>
       {msg && <div className="vex-panel p-2.5 mb-3 text-[13px]" style={{ borderColor: "#A855F7" }}>{msg}</div>}
       <div className="vex-panel p-3 mb-3 text-[13px]">
         <b>Ollama live probe:</b> {ollama?.available ? <span style={{ color: "#4ade80" }}>reachable — {ollama.models.length} models: {(ollama.models || []).join(", ") || "(none pulled)"}</span> : <span style={{ color: "#f87171" }}>offline ({ollama?.error || "not running"}) — start `ollama serve` for real inference</span>}
@@ -530,10 +533,11 @@ function RuntimesView() {
             </div>
             <div className="text-[12px] mt-1 vex-code" style={{ color: "#A1A1AA" }}>detect: {r.detected}</div>
             <div className="text-[11px] vex-code truncate" style={{ color: "#71717a" }}>{r.installPath}</div>
+            {r.name==='llama.cpp'&&<label className="block text-[12px] mt-2">GPU / backend<select className="vex-input" value={cfg[r.name]?.device??r.config?.device??'auto'} onChange={e=>setCfg(c=>({...c,[r.name]:{...c[r.name],device:e.target.value}}))}><option value="auto">Otomatik (RX 6700M öncelikli)</option><option value="none">CPU</option>{devices.map(d=><option key={d.id} value={d.id}>{d.id} · {d.name} · {Math.round(d.freeMiB)} MiB boş</option>)}</select></label>}
             <div className="grid gap-2 mt-2" style={{ gridTemplateColumns: "1fr 1fr 1fr" }}>
-              <label className="text-[11px]" style={{ color: "#A1A1AA" }}>CPU threads<input className="vex-input mt-1" type="number" defaultValue={r.config?.cpuThreads ?? 8} onChange={(e) => setCfg({ ...cfg, [r.name]: { ...(cfg[r.name] || {}), cpuThreads: Number(e.target.value) } })} /></label>
-              <label className="text-[11px]" style={{ color: "#A1A1AA" }}>GPU layers (auto/number)<input className="vex-input mt-1" type="text" defaultValue={r.config?.gpuLayers ?? "auto"} onChange={(e) => { const raw = e.target.value; setCfg({ ...cfg, [r.name]: { ...(cfg[r.name] || {}), gpuLayers: /^\d+$/.test(raw) ? Number(raw) : raw } }); }} /></label>
-              <label className="text-[11px]" style={{ color: "#A1A1AA" }}>Ctx size<input className="vex-input mt-1" type="number" defaultValue={r.config?.ctxSize ?? 4096} onChange={(e) => setCfg({ ...cfg, [r.name]: { ...(cfg[r.name] || {}), ctxSize: Number(e.target.value) } })} /></label>
+              <label className="text-[11px]" style={{ color: "#A1A1AA" }}>CPU threads<input className="vex-input mt-1" type="number" value={cfg[r.name]?.cpuThreads ?? r.config?.cpuThreads ?? 8} onChange={(e) => setCfg({ ...cfg, [r.name]: { ...(cfg[r.name] || {}), cpuThreads: Number(e.target.value) } })} /></label>
+              <label className="text-[11px]" style={{ color: "#A1A1AA" }}>GPU layers (auto/number)<input className="vex-input mt-1" type="text" value={cfg[r.name]?.gpuLayers ?? r.config?.gpuLayers ?? "auto"} onChange={(e) => { const raw = e.target.value; setCfg({ ...cfg, [r.name]: { ...(cfg[r.name] || {}), gpuLayers: /^\d+$/.test(raw) ? Number(raw) : raw } }); }} /></label>
+              <label className="text-[11px]" style={{ color: "#A1A1AA" }}>Ctx size<input className="vex-input mt-1" type="number" value={cfg[r.name]?.ctxSize ?? r.config?.ctxSize ?? 4096} onChange={(e) => setCfg({ ...cfg, [r.name]: { ...(cfg[r.name] || {}), ctxSize: Number(e.target.value) } })} /></label>
             </div>
             <div className="flex flex-wrap gap-2 mt-2">
               {!r.installed ? <button className="vex-btn" onClick={() => act(r.name, "install")}>Install</button>
@@ -632,14 +636,14 @@ function WorkspaceView() {
       const desktop=(window as Window & {vexDesktop?:DesktopBridge}).vexDesktop;
       const token=desktop?.isDesktop?await desktop.getApiToken():"";
       setActivity("Modele bağlanılıyor");
-      const response=await fetch("/api/chat",{method:"POST",signal:abort.signal,headers:{"content-type":"application/json",...(token?{"x-vex-local-token":token}:{})},body:JSON.stringify({conversationId:cid,prompt:continuation?undefined:p,continue:continuation,modelId,attachment:attach,maxTokens,thinking,effort:(selected?.capabilities?.effortValues?.includes(effort)||(!selected?.capabilities?.effortValues&&(selected?.capabilities?.parameters?.includes("reasoning_effort")||selected?.capabilities?.reasoningStyle==="effort")))?effort||undefined:undefined,images:image&&selected?.capabilities?.vision?[image]:undefined})});
+      const response=await fetch("/api/chat",{method:"POST",signal:abort.signal,headers:{"content-type":"application/json",...(token?{"x-vex-local-token":token}:{})},body:JSON.stringify({stream:true,conversationId:cid,prompt:continuation?undefined:p,continue:continuation,modelId,attachment:attach,maxTokens,thinking,effort:(selected?.capabilities?.effortValues?.includes(effort)||(!selected?.capabilities?.effortValues&&(selected?.capabilities?.parameters?.includes("reasoning_effort")||selected?.capabilities?.reasoningStyle==="effort")))?effort||undefined:undefined,images:image&&selected?.capabilities?.vision?[image]:undefined})});
       if(!response.ok){const error=await response.json();throw Error(`${error.error}${error.retryAfter!==undefined?` · Retry-After: ${error.retryAfter}s`:""}`);}
       if(response.headers.get("content-type")?.includes("text/event-stream")){
         streamed=true;setMsgs(m=>[...m,{role:"assistant",content:"",metadata:{},_streamId:streamId}]);
         let done=false;
         for await(const frame of parseSSE(response.body!,abort.signal)){
           const event=JSON.parse(frame.data);
-          if(event.type==="status")setActivity(({preparing:"İstek hazırlanıyor",connecting:"Modele bağlanılıyor",connected:"Bağlantı kuruldu",thinking:"Model düşünüyor",generating:"Yanıt üretiliyor",tool_proposed:"Araç çağrısı hazırlanıyor"} as Record<string,string>)[event.status]||event.status);
+          if(event.type==="status")setActivity(({preparing:"İstek hazırlanıyor",loading_model:"Model belleğe yükleniyor",connecting:"Modele bağlanılıyor",connected:"Bağlantı kuruldu",thinking:"Model düşünüyor",generating:"Yanıt üretiliyor",tool_proposed:"Araç çağrısı hazırlanıyor"} as Record<string,string>)[event.status]||event.status);
           if(event.type==="text")setMsgs(m=>m.map(x=>x._streamId===streamId?{...x,content:x.content+event.text}:x));
           if(event.type==="reasoning")setMsgs(m=>m.map(x=>x._streamId===streamId?{...x,metadata:{...x.metadata,reasoning:(x.metadata?.reasoning||"")+event.text}}:x));
           if(event.type==="error")throw Error(`${event.error} (${event.code})${event.retryAfter!==undefined?` · Retry-After ${event.retryAfter}s`:""}`);
@@ -683,6 +687,7 @@ function WorkspaceView() {
                 {m.role==="tool"&&<div className="text-[11px] text-purple-400">GERÇEK ARAÇ SONUCU</div>}
                 {m.metadata?.reasoning&&<details><summary className="text-[12px] text-purple-400">Sağlayıcının reasoning çıktısı</summary><pre className="vex-pre text-[12px]">{m.metadata.reasoning}</pre></details>}
                 <pre className="vex-pre text-[13px]">{m.content}</pre>
+                {m.metadata?.localMetrics&&<div className="text-[11px] text-zinc-400 mt-2"><div>Prompt: {m.metadata.localMetrics.promptTokPerSec?.toFixed(1)??'?'} tok/s · Generation: {m.metadata.localMetrics.generationTokPerSec?.toFixed(1)??'?'} tok/s · İlk token: {m.metadata.localMetrics.ttftMs?.toFixed(0)??'?'} ms</div><div>İşlenen prompt: {m.metadata.localMetrics.promptTokens??'?'} · Üretilen: {m.metadata.localMetrics.generationTokens??'?'} · Cache: {m.metadata.localMetrics.cachedTokens??'?'} token · {m.metadata.localMetrics.serverReused?'Model yeniden kullanıldı':'Model yüklendi'} · {m.metadata.localMetrics.device} · GPU katmanı: {m.metadata.localMetrics.offloadedLayers??'?'} / {m.metadata.localMetrics.totalLayers??'?'}</div></div>}
                 {m.metadata?.usage&&<details className="text-[11px]"><summary>API kullanımı · {m.metadata.finishReason}</summary><pre className="vex-pre">{JSON.stringify(m.metadata.usage,null,2)}</pre></details>}
               </div>
             ))}
@@ -1296,4 +1301,3 @@ function SettingsView() {
     </div>
   );
 }
-

@@ -24,6 +24,7 @@ jobs:
       - run: npm run dist:win
       - run: npm test
       - run: npm run test:ai
+      - run: npm run test:local
       - run: npm run test:credentials
       - uses: actions/upload-artifact@v4
         with:

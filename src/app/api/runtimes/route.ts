@@ -6,7 +6,7 @@ import { eq } from "drizzle-orm";
 import { RUNTIME_DEFS, checkOllama, ensureDirs, execSafe, RUNTIMES_DIR } from "@/lib/vex";
 import path from "node:path";
 import fs from "node:fs";
-import { probeLlama } from "@/lib/llama";
+import { probeLlama,llamaDevices,llamaServer } from "@/lib/llama";
 
 async function seed() {
   ensureDirs();
@@ -18,20 +18,22 @@ async function seed() {
   }
 }
 
-export async function GET() {
+export async function GET(req:NextRequest) {
   await seed();
   const rows = await db.select().from(runtimes);
   // live detection
-  const ollama = await checkOllama();
+  const force=req.nextUrl.searchParams.get('refresh')==='1';
+  const ollama = await checkOllama(force);
+  let devices:Awaited<ReturnType<typeof llamaDevices>>=[],deviceError='';
+  try{const rt=rows.find(r=>r.name==='llama.cpp');const probe=await probeLlama(rt?.installPath||path.join(RUNTIMES_DIR,'llama.cpp'),force);devices=await llamaDevices(probe,force);}catch(error){deviceError=error instanceof Error?error.message:'Device detection failed';}
   const out = rows.map((r) => {
     let detected = "";
     if (r.name === "ollama") detected = ollama.available ? `reachable (${ollama.models.length} models)` : `not reachable (${ollama.error || "is Ollama running?"})`;
-    else if (r.name === "llama.cpp") detected = fs.existsSync(path.join(r.installPath, process.platform === "win32" ? "llama-cli.exe" : "llama-cli")) ? "local binary found; press Install/Check to verify" : "Check local folder / PATH";
-    else if (r.name === "onnx") { const c = execSafe("python3 -c \"import onnxruntime; print(onnxruntime.__version__)\" 2>&1"); detected = c.ok ? `onnxruntime ${c.out.trim()}` : "python onnxruntime missing"; }
-    else if (r.name === "transformers") { const c = execSafe("python3 -c \"import transformers; print(transformers.__version__)\" 2>&1"); detected = c.ok ? `transformers ${c.out.trim()}` : "python transformers missing"; }
+    else if (r.name === "llama.cpp") detected = deviceError||`llama-server ready · ${devices.map(d=>`${d.id}: ${d.name}`).join(', ')||'CPU only'}`;
+    else detected='Adapter not implemented';
     return { ...r, detected };
   });
-  return NextResponse.json({ runtimes: out, ollama });
+  return NextResponse.json({ runtimes: out, ollama,devices,server:llamaServer.snapshot() });
 }
 
 export async function POST(req: NextRequest) {
@@ -56,7 +58,7 @@ export async function POST(req: NextRequest) {
       const dir = path.join(RUNTIMES_DIR, "llama.cpp");
       try {
         const probe = await probeLlama(dir);
-        await db.update(runtimes).set({ installed: true, version: "CLI verified", logs: append(`Verified ${probe.executable}`), status: "ready" }).where(eq(runtimes.name, b.name));
+        await db.update(runtimes).set({ installed: true, version: "Server verified", logs: append(`Verified ${probe.executable}`), status: "ready" }).where(eq(runtimes.name, b.name));
       } catch (error) {
         await db.update(runtimes).set({ installed: false, status: "missing-deps", logs: append(String(error)) }).where(eq(runtimes.name, b.name));
         return NextResponse.json({ error: String(error) }, { status: 400 });
@@ -66,6 +68,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true });
   }
   if (b.action === "uninstall") {
+    if(b.name==='llama.cpp'){try{await llamaServer.stop();}catch(e){return NextResponse.json({error:String(e)},{status:409});}}
     await db.update(runtimes).set({ installed: false, version: "", status: "stopped", logs: append("uninstalled adapter metadata (user files preserved)") }).where(eq(runtimes.name, b.name));
     return NextResponse.json({ ok: true });
   }
@@ -74,9 +77,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true });
   }
   if (b.action === "start" || b.action === "stop" || b.action === "restart") {
-    if (!rt.installed && b.name !== "ollama") return NextResponse.json({ error: "runtime not installed" }, { status: 400 });
+    if (!rt.installed && b.name !== "ollama"&&b.action!=='stop') return NextResponse.json({ error: "runtime not installed" }, { status: 400 });
     if (b.name === "llama.cpp") {
-      try { await probeLlama(path.join(RUNTIMES_DIR, "llama.cpp")); }
+      if(b.action==='stop'||b.action==='restart'){try{await llamaServer.stop();}catch(e){return NextResponse.json({error:String(e)},{status:409});}}
+      try { if(b.action!=='stop')await probeLlama(path.join(RUNTIMES_DIR, "llama.cpp")); }
       catch (error) { return NextResponse.json({ error: String(error) }, { status: 400 }); }
     } else if (b.name === "ollama") {
       const live = await checkOllama();
@@ -88,6 +92,7 @@ export async function POST(req: NextRequest) {
   }
 
   if (b.action === "config") {
+    if(b.name==='llama.cpp'){try{await llamaServer.stop();}catch(e){return NextResponse.json({error:String(e)},{status:409});}}
     await db.update(runtimes).set({ config: { ...((rt.config as object) || {}), ...(b.config || {}) }, logs: append(`config updated: ${JSON.stringify(b.config)}`) }).where(eq(runtimes.name, b.name));
     return NextResponse.json({ ok: true });
   }

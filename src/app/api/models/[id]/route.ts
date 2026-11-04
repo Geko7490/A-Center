@@ -1,10 +1,11 @@
 import { storageBusy } from "@/lib/maintenance";
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
-import { models, testResults } from "@/db/schema";
+import { models, testResults,runtimes } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import fs from "node:fs";
-import { probeLlama } from "@/lib/llama";
+import { probeLlama,llamaServer } from "@/lib/llama";
+import type {LlamaOptions} from '@/lib/llama-server';
 import { RUNTIMES_DIR } from "@/lib/vex";
 import path from "node:path";
 import { checkOllama, estimateModelMemory, FORMAT_RUNTIME_MATRIX, getHardwareSnapshot, llamaCppGenerate } from "@/lib/vex";
@@ -55,6 +56,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     return NextResponse.json({ ok: true, note, estimate: est, hardware: { ramFree: availRam, vramFree } });
   }
   if (action === "stop" || action === "restart") {
+    try{await llamaServer.stop(m.installPath);}catch(e){return NextResponse.json({error:String(e)},{status:409});}
     const next = "stopped";
     await db.update(models).set({ status: next, lastUsedAt: new Date() }).where(eq(models.id, id));
     return NextResponse.json({ ok: true, status: next });
@@ -71,7 +73,8 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     let output = "", tps = 0, status = "passed", error = "";
     try {
       if (m.format === "GGUF" && !m.installPath.startsWith("ollama:") && m.activeRuntime !== "ollama") {
-        const result = await llamaCppGenerate(m.installPath, "Reply with OK.", "", { contextTokens: 1024, gpuLayers: "auto", cpuThreads: 8 });
+        const rt=(await db.select().from(runtimes).where(eq(runtimes.name,'llama.cpp')))[0];const cfg=(rt?.config||{}) as LlamaOptions&{ctxSize?:number};
+        const result = await llamaCppGenerate(m.installPath, "Reply with OK.", "", {...cfg,contextTokens:cfg.ctxSize||4096,maxTokens:64,signal:req.signal});
         output = result.text; tps = result.tps;
       } else if (m.activeRuntime === "ollama" || m.installPath.startsWith("ollama:")) {
         const oc = await checkOllama();
@@ -117,6 +120,7 @@ export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ 
   const m = rows[0];
   if (!m) return NextResponse.json({ error: "not found" }, { status: 404 });
   if (m.status === "running") return NextResponse.json({ error: "Stop the model before deleting." }, { status: 400 });
+  try{await llamaServer.stop(m.installPath);}catch(e){return NextResponse.json({error:String(e)},{status:409});}
   try {
     if (m.installPath && fs.existsSync(m.installPath)) {
       const st = fs.statSync(m.installPath);

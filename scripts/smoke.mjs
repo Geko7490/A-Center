@@ -68,7 +68,12 @@ try {
   const model=(await api('/api/models',{name:'smoke-model',format:'GGUF',installPath:process.env.A_CENTER_TEST_MODEL})).data.model;
   const conv=(await api('/api/chat',{action:'create',modelId:model.name})).data.conversation;
   const reply=await api('/api/chat',{conversationId:conv.id,prompt:'Sadece OK yaz.'});
-  assert.equal(reply.status,200,JSON.stringify(reply)); assert.match(reply.data.engine,/llama.cpp/); assert.match(reply.data.message.content,/OK/i);
+  assert.equal(reply.status,200,JSON.stringify(reply)); assert.match(reply.data.engine,/llama-server/); assert(reply.data.message.content.trim());assert(reply.data.message.metadata.localMetrics.generationTokens>0);
+  assert.equal(reply.data.message.metadata.localMetrics.device,process.env.A_CENTER_TEST_DEVICE||'Vulkan0');
+  const second=await api('/api/chat',{conversationId:conv.id,prompt:'Sadece OK yaz.'});assert.equal(second.status,200,JSON.stringify(second));assert.equal(second.data.message.metadata.localMetrics.workerPid,reply.data.message.metadata.localMetrics.workerPid);assert.equal(second.data.message.metadata.localMetrics.serverReused,true);assert(second.data.message.metadata.localMetrics.cachedTokens>0);
+  const streamed=await fetch(`http://127.0.0.1:${port}/api/chat`,{method:'POST',headers:{'content-type':'application/json','x-vex-local-token':'smoke-token'},body:JSON.stringify({conversationId:conv.id,prompt:'Reply with OK.',stream:true,maxTokens:32})});assert.equal(streamed.status,200);assert.match(streamed.headers.get('content-type'),/text\/event-stream/);
+  const events=(await streamed.text()).split('\n\n').filter(f=>f.startsWith('data: ')).map(f=>JSON.parse(f.slice(6)));const done=events.find(e=>e.type==='done');assert(done,JSON.stringify(events));assert.equal(events.filter(e=>e.type==='text').map(e=>e.text).join(''),done.message.content);assert.equal(done.message.metadata.localMetrics.workerPid,reply.data.message.metadata.localMetrics.workerPid);
+  await api(`/api/models/${model.id}`,{action:'stop'},'PATCH');
   assert(!reply.data.message.content.includes('available commands:'), 'CLI banner leaked');
   console.log('PASS real GGUF response through AI Workspace API');
  }

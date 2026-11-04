@@ -1,10 +1,12 @@
 import { cloudChat } from "@/lib/ai/chat";
+import { localChat } from "@/lib/local-chat";
+import type {LocalMetrics} from '@/lib/llama-server';
 import { storageBusy } from "@/lib/maintenance";
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
-import { conversations, messages, models, runtimes } from "@/db/schema";
+import { conversations, messages, models } from "@/db/schema";
 import { desc, eq } from "drizzle-orm";
-import { checkOllama, ollamaGenerate, llamaCppGenerate } from "@/lib/vex";
+import { checkOllama, ollamaGenerate } from "@/lib/vex";
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
@@ -58,6 +60,9 @@ export async function POST(req: NextRequest) {
   if (!choice) choice = conv.mode === "code" ? conv.codingModel : conv.mode === "agent" ? conv.planningModel : conv.utilityModel || conv.codingModel || conv.planningModel;
   if (choice?.startsWith("evren::") || choice?.startsWith("nvidia::")) return cloudChat(req,conv,b,choice);
   if (!b.prompt) return NextResponse.json({ error: "Message required for local inference" }, { status: 400 });
+  const availableLocal=await db.select().from(models);
+  const gguf=availableLocal.find(m=>m.id===choice||m.name===choice)||(!choice?availableLocal.find(m=>m.status==='running')||availableLocal.find(m=>m.format==='GGUF'):undefined);
+  if(gguf?.format==='GGUF'&&gguf.activeRuntime!=='ollama'&&!gguf.installPath.startsWith('ollama:'))return localChat(req,conv,b,gguf);
   let fullPrompt = b.attachment ? `${b.prompt}\n\n[attached file context]\n${String(b.attachment).slice(0, 6000)}` : b.prompt;
   const history = await db.select().from(messages).where(eq(messages.conversationId, b.conversationId)).orderBy(messages.createdAt);
   const contextBudget = Math.max(1024, Math.min(8192, conv.contextTokens || 4096)) * 2;
@@ -75,24 +80,14 @@ export async function POST(req: NextRequest) {
   const installed = await db.select().from(models);
   const selectedLocalModel = installed.find((model) => model.id === activeModel || model.name === activeModel) || (!activeModel ? installed.find((model) => model.status === "running") || installed.find((model) => model.format === "GGUF") : undefined);
   let text = "", ms = 0, tps = 0, engine = "local-fallback";
+  let localMetrics:LocalMetrics|undefined;
   const oc = await checkOllama();
   const targetName = selectedLocalModel?.installPath.startsWith("ollama:") ? selectedLocalModel.installPath.slice(7) : selectedLocalModel?.name || activeModel;
   const ollamaTarget = targetName ? oc.models.find((name) => name === targetName || name === `${targetName}:latest`) || "" : oc.models[0] || "";
   try {
-    if (selectedLocalModel?.format === "GGUF" && selectedLocalModel.activeRuntime !== "ollama" && selectedLocalModel.installPath && !selectedLocalModel.installPath.startsWith("ollama:")) {
-      const llamaRows = await db.select().from(runtimes).where(eq(runtimes.name, "llama.cpp"));
-      const llamaConfig = (llamaRows[0]?.config || {}) as { cpuThreads?: number; gpuLayers?: number | string; ctxSize?: number };
-      const r = await llamaCppGenerate(selectedLocalModel.installPath, fullPrompt, conv.systemPrompt || "", {
-        temperature: conv.temperature,
-        contextTokens: conv.contextTokens || llamaConfig.ctxSize || 4096,
-        cpuThreads: llamaConfig.cpuThreads || 8,
-        gpuLayers: llamaConfig.gpuLayers ?? "auto",
-        signal: req.signal,
-      });
-      text = r.text; ms = r.ms; tps = r.tps; engine = `llama.cpp:${selectedLocalModel.name}`;
-    } else if (oc.available && ollamaTarget) {
+    if (oc.available && ollamaTarget) {
       const r = await ollamaGenerate(ollamaTarget, fullPrompt, conv.systemPrompt || undefined, { temperature: conv.temperature, num_ctx: conv.contextTokens, signal:req.signal });
-      text = r.text; ms = r.ms; tps = r.tps; engine = `ollama:${ollamaTarget}`;
+      text = r.text; ms = r.ms; tps = r.tps;localMetrics=r.metrics; engine = `ollama:${ollamaTarget}`;
     } else {
       throw new Error(`Selected model/runtime is unavailable: ${activeModel || "no model selected"}. Import a GGUF in My Models or start the matching Ollama model.`);
     }
@@ -100,8 +95,8 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: e instanceof Error ? e.message : "Inference failed" }, { status: 502 });
 
   }
-  const tokens = Math.ceil(text.length / 4);
-  const [msg] = await db.insert(messages).values({ conversationId: b.conversationId, role: "assistant", content: text, tokens, genMs: ms, tokensPerSec: tps }).returning();
+  const tokens = localMetrics?.generationTokens||0;
+  const [msg] = await db.insert(messages).values({ conversationId: b.conversationId, role: "assistant", content: text, tokens, genMs: ms, tokensPerSec: tps,metadata:{localMetrics} }).returning();
   if (convs[0].title === "New conversation") {
     await db.update(conversations).set({ title: b.prompt.slice(0, 48) }).where(eq(conversations.id, b.conversationId));
   }

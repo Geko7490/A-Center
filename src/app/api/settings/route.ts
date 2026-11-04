@@ -1,5 +1,5 @@
 import { storageBusy, setStorageBusy, aiOperationActive } from "@/lib/maintenance";
-import { isGenerating } from "@/lib/llama";
+import { isGenerating,llamaServer } from "@/lib/llama";
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { appSettings, downloads, fileHistory, gitRepos, models, projects, runtimes } from "@/db/schema";
@@ -61,6 +61,7 @@ async function saveSettings(req: NextRequest) {
     }
 
     if (isGenerating() || aiOperationActive()) return NextResponse.json({ error: "Wait for the current model response or tool operation before relocating storage." }, { status: 409 });
+    await llamaServer.stop();
     const activeDownloads = await db.select().from(downloads);
     if (activeDownloads.some((download) => ["queued", "downloading", "paused"].includes(download.status))) {
       return NextResponse.json({ error: "Finish or cancel active model downloads before moving storage." }, { status: 409 });

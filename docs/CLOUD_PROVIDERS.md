@@ -35,7 +35,7 @@
 
 `npm run test:ui` uses an isolated headless browser and fixture catalog. It checks provider cards, filtering and provider/local model switching without losing the conversation. Set A_CENTER_BROWSER to an installed Chromium browser executable outside Windows/Edge environments.
 
-`npm test` runs existing local API/storage/download/permission regressions. Optional real GGUF validation requires A_CENTER_TEST_MODEL and a matching llama-cli on PATH.
+`npm test` runs existing local API/storage/download/permission regressions. Optional real GGUF validation requires A_CENTER_TEST_MODEL and a matching llama-server on PATH.
 
 Initial 0.2.0 development had no authenticated provider tests. During the 0.2.1 follow-up on 2026-11-04, the existing OS-encrypted EVREN key was used without displaying it. Live `auto` generation and the actual Workspace chat route returned `OK` in both Chat Completions and Responses modes, using an isolated temporary database. This reproduced and fixed the real failure: EVREN allows `auto` generation but rejects `/responses/input_tokens` for `auto`. Chat Completions no longer depends on the Responses token-count API, and Responses skips preflight counting for the auto router; the upstream still enforces context limits. These small live checks do not prove live reasoning, tool execution, all models or NVIDIA account access. A locally unavailable GGUF cannot be replaced by a mock and called a live model test.
 
