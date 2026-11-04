@@ -3,16 +3,18 @@ import fs from "node:fs";
 import path from "node:path";
 
 export type BinaryResult = { stdout: string; stderr: string; code: number | null; signal: string | null };
-export function runBinary(executable: string, args: string[], timeout = 600000): Promise<BinaryResult> {
+export function runBinary(executable: string, args: string[], timeout = 600000, signal?: AbortSignal): Promise<BinaryResult> {
   return new Promise((resolve, reject) => {
+    if(signal?.aborted){reject(new Error("Request cancelled"));return;}
     const child = spawn(executable, args, { windowsHide: true, cwd: path.isAbsolute(executable) ? path.dirname(executable) : undefined, stdio: ["ignore", "pipe", "pipe"] });
     let stdout = "", stderr = "", timedOut = false;
     const timer = setTimeout(() => { timedOut = true; child.kill(); }, timeout);
+    const abort=()=>child.kill();signal?.addEventListener("abort",abort,{once:true});
     child.stdout.setEncoding("utf8"); child.stderr.setEncoding("utf8");
     child.stdout.on("data", (chunk) => { stdout = (stdout + chunk).slice(-8 * 1024 * 1024); });
     child.stderr.on("data", (chunk) => { stderr = (stderr + chunk).slice(-1024 * 1024); });
-    child.once("error", (error) => { clearTimeout(timer); reject(error); });
-    child.once("close", (code, signal) => { clearTimeout(timer); resolve({ stdout, stderr: timedOut ? `${stderr}\nGeneration timed out after ${timeout / 1000}s` : stderr, code, signal }); });
+    child.once("error", (error) => { clearTimeout(timer); signal?.removeEventListener("abort",abort); reject(error); });
+    child.once("close", (code, exitSignal) => { clearTimeout(timer); signal?.removeEventListener("abort",abort); resolve({ stdout, stderr: signal?.aborted ? "Request cancelled" : timedOut ? `${stderr}\nGeneration timed out after ${timeout / 1000}s` : stderr, code, signal: exitSignal }); });
   });
 }
 
@@ -37,7 +39,7 @@ export async function probeLlama(runtimeDir: string) {
 
 const inferenceState = globalThis as typeof globalThis & { aCenterGenerating?: boolean };
 export function isGenerating() { return inferenceState.aCenterGenerating === true; }
-export async function generateLlama(runtimeDir: string, model: string, prompt: string, system: string, options: { temperature?: number; contextTokens?: number; cpuThreads?: number; gpuLayers?: number | string; maxTokens?: number }) {
+export async function generateLlama(runtimeDir: string, model: string, prompt: string, system: string, options: { temperature?: number; contextTokens?: number; cpuThreads?: number; gpuLayers?: number | string; maxTokens?: number; signal?:AbortSignal }) {
   if (isGenerating()) throw new Error("Another model response is still running. Wait for it to finish before sending again.");
   if (!fs.existsSync(model)) throw new Error(`GGUF model file not found: ${model}`);
   inferenceState.aCenterGenerating = true;
@@ -54,7 +56,7 @@ export async function generateLlama(runtimeDir: string, model: string, prompt: s
     if (help.includes("--reasoning-budget")) args.push("--reasoning-budget", "0");
     if (help.includes("--no-show-timings")) args.push("--no-show-timings");
     const started = Date.now();
-    const result = await runBinary(executable, args);
+    const result = await runBinary(executable, args,600000,options.signal);
     fs.mkdirSync(runtimeDir, { recursive: true });
     const log = path.join(runtimeDir, "last-inference.log");
     // Do not persist user prompts in diagnostic logs.

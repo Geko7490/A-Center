@@ -1,3 +1,4 @@
+import { cloudChat } from "@/lib/ai/chat";
 import { storageBusy } from "@/lib/maintenance";
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
@@ -17,12 +18,13 @@ export async function GET(req: NextRequest) {
 export async function POST(req: NextRequest) {
   if (storageBusy()) return NextResponse.json({ error: "Storage relocation in progress. Restart A-Center before making changes." }, { status: 409 });
   const body = await req.json().catch(() => ({}));
-  const b = body as { action?: string; title?: string; mode?: string; conversationId?: string; prompt?: string; modelId?: string; systemPrompt?: string; temperature?: number; contextTokens?: number; planningModel?: string; codingModel?: string; utilityModel?: string; attachment?: string };
+  const b = body as { providerData?: Record<string, any>; continue?: boolean; maxTokens?: number; thinking?: boolean; effort?: string; images?: string[]; action?: string; title?: string; mode?: string; conversationId?: string; prompt?: string; modelId?: string; systemPrompt?: string; temperature?: number; contextTokens?: number; planningModel?: string; codingModel?: string; utilityModel?: string; attachment?: string };
   if (b.action === "create") {
     const [c] = await db.insert(conversations).values({
       title: b.title || "New conversation", mode: b.mode || "chat",
       modelId: b.modelId || "", planningModel: b.planningModel || "", codingModel: b.codingModel || "", utilityModel: b.utilityModel || "",
       systemPrompt: b.systemPrompt || "", temperature: b.temperature ?? 0.7, contextTokens: b.contextTokens ?? 4096,
+      providerData: b.providerData ? {projectId:String(b.providerData.projectId||""),taskId:String(b.providerData.taskId||"")} : {},
     }).returning();
     return NextResponse.json({ conversation: c });
   }
@@ -37,6 +39,7 @@ export async function POST(req: NextRequest) {
       ...(b.codingModel !== undefined ? { codingModel: b.codingModel } : {}),
       ...(b.utilityModel !== undefined ? { utilityModel: b.utilityModel } : {}),
       ...(b.title ? { title: b.title } : {}),
+      ...(b.providerData ? { providerData: { ...((await db.select().from(conversations).where(eq(conversations.id,b.conversationId)))[0]?.providerData || {}), projectId: String(b.providerData.projectId || ""), maxTokens: Math.max(1, Math.min(131072,Number(b.providerData.maxTokens)||2048)), thinking: typeof b.providerData.thinking==="boolean"?b.providerData.thinking:undefined, effort: typeof b.providerData.effort==="string"?b.providerData.effort:undefined } } : {}),
     }).where(eq(conversations.id, b.conversationId));
     return NextResponse.json({ ok: true });
   }
@@ -47,10 +50,14 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true });
   }
   // send message
-  if (!b.conversationId || !b.prompt) return NextResponse.json({ error: "conversationId and prompt required" }, { status: 400 });
+  if (!b.conversationId || (!b.prompt && !b.continue)) return NextResponse.json({ error: "conversationId and prompt required" }, { status: 400 });
   const convs = await db.select().from(conversations).where(eq(conversations.id, b.conversationId));
   const conv = convs[0];
   if (!conv) return NextResponse.json({ error: "conversation not found" }, { status: 404 });
+  let choice = b.modelId || conv.modelId;
+  if (!choice) choice = conv.mode === "code" ? conv.codingModel : conv.mode === "agent" ? conv.planningModel : conv.utilityModel || conv.codingModel || conv.planningModel;
+  if (choice?.startsWith("evren::") || choice?.startsWith("nvidia::")) return cloudChat(req,conv,b,choice);
+  if (!b.prompt) return NextResponse.json({ error: "Message required for local inference" }, { status: 400 });
   let fullPrompt = b.attachment ? `${b.prompt}\n\n[attached file context]\n${String(b.attachment).slice(0, 6000)}` : b.prompt;
   const history = await db.select().from(messages).where(eq(messages.conversationId, b.conversationId)).orderBy(messages.createdAt);
   const contextBudget = Math.max(1024, Math.min(8192, conv.contextTokens || 4096)) * 2;
@@ -80,10 +87,11 @@ export async function POST(req: NextRequest) {
         contextTokens: conv.contextTokens || llamaConfig.ctxSize || 4096,
         cpuThreads: llamaConfig.cpuThreads || 8,
         gpuLayers: llamaConfig.gpuLayers ?? "auto",
+        signal: req.signal,
       });
       text = r.text; ms = r.ms; tps = r.tps; engine = `llama.cpp:${selectedLocalModel.name}`;
     } else if (oc.available && ollamaTarget) {
-      const r = await ollamaGenerate(ollamaTarget, fullPrompt, conv.systemPrompt || undefined, { temperature: conv.temperature, num_ctx: conv.contextTokens });
+      const r = await ollamaGenerate(ollamaTarget, fullPrompt, conv.systemPrompt || undefined, { temperature: conv.temperature, num_ctx: conv.contextTokens, signal:req.signal });
       text = r.text; ms = r.ms; tps = r.tps; engine = `ollama:${ollamaTarget}`;
     } else {
       throw new Error(`Selected model/runtime is unavailable: ${activeModel || "no model selected"}. Import a GGUF in My Models or start the matching Ollama model.`);

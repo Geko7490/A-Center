@@ -14,7 +14,7 @@
 ## Remaining product work
 
 1. Persistent llama-server with genuine token streaming, cancellation and structured chat messages; current CLI mode reloads the model for each request.
-2. Automated task execution with tools, reviewable file diffs and verified step results; currently tasks are plans only.
+2. Version 0.2.0 adds an approval-based cloud agent tool loop and links plans to it. Independent autonomous scheduling and automatic checklist verification remain future work; plan completion still requires review.
 3. One-click runtime package download with signed/checksummed binaries, version pinning and update management; current runtime binaries are supplied manually.
 4. Private/gated Hugging Face repository authentication through the OS credential store, richer filters and revision/checksum pinning.
 5. Roblox Studio end-to-end testing, stale-connection detection and command recovery after app restarts.

@@ -9,6 +9,7 @@ let serverProcess;
 let mainWindow;
 let localToken;
 let serverUrl;
+let credentialBridge;
 
 function findPort() {
   return new Promise((resolve, reject) => {
@@ -53,6 +54,7 @@ async function startLocalServer() {
   localToken = crypto.randomBytes(32).toString("hex");
   const userData = app.getPath("userData");
   fs.mkdirSync(userData, { recursive: true });
+  credentialBridge = await require("./credentials.cjs").createCredentialBridge(require("electron").safeStorage, userData);
   const defaultStorageRoot = path.join(userData, "storage");
   const configPath = path.join(userData, "settings.json");
   let storageRoot = defaultStorageRoot;
@@ -72,6 +74,8 @@ async function startLocalServer() {
       HOSTNAME: "127.0.0.1",
       PORT: String(port),
       VEX_LOCAL_TOKEN: localToken,
+      VEX_CREDENTIAL_URL: credentialBridge.url,
+      VEX_CREDENTIAL_TOKEN: credentialBridge.token,
       VEX_STORAGE: storageRoot,
       VEX_DATABASE: path.join(defaultStorageRoot, "database"),
       VEX_CONFIG_PATH: configPath,
@@ -154,6 +158,7 @@ app.on("activate", () => {
 });
 
 app.on("before-quit", () => {
+  credentialBridge?.close();
   if (serverProcess && serverProcess.exitCode === null) serverProcess.kill();
 });
 

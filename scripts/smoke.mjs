@@ -23,6 +23,7 @@ try {
  let healthy=false;
  for(let i=0;i<120;i++){ try {if((await api('/api/health',null,'GET')).status===200){healthy=true;break;}}catch{} await new Promise(r=>setTimeout(r,500)); }
  assert(healthy, logs);
+ const crossOrigin=await fetch(`http://127.0.0.1:${port}/api/providers`,{method:'POST',headers:{'content-type':'application/json','x-vex-local-token':'smoke-token',origin:'https://untrusted.invalid'},body:JSON.stringify({provider:'evren',action:'test'})});assert.equal(crossOrigin.status,403);
  assert.equal((await api('/api/settings',{values:{'storage.root':path.parse(target).root}})).status,400);
  assert.equal((await api('/api/projects',{name:'escape',path:'../escape'})).status,400);
  const project=(await api('/api/projects',{name:'permission-test',path:'permission-test'})).data.project;

@@ -1,6 +1,6 @@
 {
   "name": "a-center",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "private": true,
   "main": "desktop/main.cjs",
   "scripts": {
@@ -12,7 +12,10 @@
     "desktop:dev": "electron . --dev",
     "dist:win": "npm run build && electron-builder --win nsis --publish never",
     "db:generate": "drizzle-kit generate",
-    "test": "node scripts/smoke.mjs"
+    "test": "node scripts/smoke.mjs",
+    "test:ai": "tsx --test scripts/ai.test.ts",
+    "test:credentials": "electron scripts/credentials-smoke.cjs",
+    "test:ui": "tsx scripts/ui-smoke.ts"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.3.14",
@@ -31,8 +34,10 @@
     "electron-builder": "^26.0.12",
     "eslint": "9.39.4",
     "eslint-config-next": "16.4.5",
+    "playwright-core": "1.64.1",
     "postcss": "8.5.32",
     "tailwindcss": "4.1.17",
+    "tsx": "4.23.15",
     "typescript": "5.9.3"
   },
   "build": {

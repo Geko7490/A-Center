@@ -15,6 +15,20 @@
       "when": 1793730379589,
       "tag": "0001_thick_silverclaw",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1793795123907,
+      "tag": "0002_smart_black_panther",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1793795722165,
+      "tag": "0003_nervous_korg",
+      "breakpoints": true
     }
   ]
 }

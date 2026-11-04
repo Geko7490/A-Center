@@ -8,16 +8,17 @@ import { promisify } from "node:util";
 import fs from "node:fs";
 import path from "node:path";
 import { WORKSPACE_DIR, ensureDirs, safeJoin } from "@/lib/vex";
+import { redactKnownSecrets } from "@/lib/ai/keys";
 
 const run = promisify(execFile);
 
-async function git(cwd: string, args: string[]): Promise<{ ok: boolean; out: string }> {
+async function runGit(cwd: string, args: string[], signal?: AbortSignal): Promise<{ ok: boolean; out: string }> {
   try {
-    const { stdout, stderr } = await run("git", args, { cwd, timeout: 30000, maxBuffer: 1024 * 1024 * 4 });
-    return { ok: true, out: (stdout + stderr).slice(0, 6000) };
+    const { stdout, stderr } = await run("git", args, { cwd, signal, timeout: 30000, maxBuffer: 1024 * 1024 * 4 });
+    return { ok: true, out: await redactKnownSecrets((stdout + stderr).slice(0, 6000)) };
   } catch (e: unknown) {
     const err = e as { stdout?: string; stderr?: string; message?: string };
-    return { ok: false, out: String((err.stdout || "") + (err.stderr || "") + (err.message || "")).slice(0, 6000) };
+    return { ok: false, out: await redactKnownSecrets(String((err.stdout || "") + (err.stderr || "") + (err.message || "")).slice(0, 6000)) };
   }
 }
 
@@ -28,11 +29,11 @@ export async function GET() {
   for (const r of rows) {
     let status = "", branches = "", log = "";
     if (fs.existsSync(r.localPath)) {
-      const s = await git(r.localPath, ["status", "--short", "--branch"]);
+      const s = await runGit(r.localPath, ["status", "--short", "--branch"]);
       status = s.out;
-      const br = await git(r.localPath, ["branch", "-a"]);
+      const br = await runGit(r.localPath, ["branch", "-a"]);
       branches = br.out;
-      const lg = await git(r.localPath, ["log", "--oneline", "-n", "8"]);
+      const lg = await runGit(r.localPath, ["log", "--oneline", "-n", "8"]);
       log = lg.out;
     } else status = "local path missing";
     enriched.push({ ...r, liveStatus: status, liveBranches: branches, liveLog: log });
@@ -41,6 +42,7 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
+  const git = (cwd: string, args: string[]) => runGit(cwd, args, req.signal);
   if (storageBusy()) return NextResponse.json({ error: "Storage relocation in progress. Restart A-Center before making changes." }, { status: 409 });
   ensureDirs();
   const body = await req.json().catch(() => ({}));

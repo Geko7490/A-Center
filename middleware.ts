@@ -6,10 +6,9 @@ export function middleware(request: NextRequest) {
   if (request.nextUrl.pathname === "/api/health") return NextResponse.next();
 
   const token = process.env.VEX_LOCAL_TOKEN;
-  if (!token) return NextResponse.next();
 
   const supplied = request.headers.get("x-vex-local-token") || "";
-  if (supplied.length !== token.length || supplied !== token) {
+  if (token && (supplied.length !== token.length || supplied !== token)) {
     return NextResponse.json({ error: "unauthorized local application request" }, { status: 401 });
   }
 

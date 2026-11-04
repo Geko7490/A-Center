@@ -1,4 +1,4 @@
-import { storageBusy, setStorageBusy } from "@/lib/maintenance";
+import { storageBusy, setStorageBusy, aiOperationActive } from "@/lib/maintenance";
 import { isGenerating } from "@/lib/llama";
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
@@ -60,7 +60,7 @@ async function saveSettings(req: NextRequest) {
       return NextResponse.json({ error: "Choose a separate folder, such as D:\\A-Center." }, { status: 400 });
     }
 
-    if (isGenerating()) return NextResponse.json({ error: "Wait for the current model response before relocating storage." }, { status: 409 });
+    if (isGenerating() || aiOperationActive()) return NextResponse.json({ error: "Wait for the current model response or tool operation before relocating storage." }, { status: 409 });
     const activeDownloads = await db.select().from(downloads);
     if (activeDownloads.some((download) => ["queued", "downloading", "paused"].includes(download.status))) {
       return NextResponse.json({ error: "Finish or cancel active model downloads before moving storage." }, { status: 409 });

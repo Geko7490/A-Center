@@ -208,11 +208,11 @@ export async function checkOllama(): Promise<{ available: boolean; models: strin
   }
 }
 
-export async function ollamaGenerate(model: string, prompt: string, system?: string, opts?: { temperature?: number; num_ctx?: number }): Promise<{ text: string; ms: number; tps: number }> {
+export async function ollamaGenerate(model: string, prompt: string, system?: string, opts?: { temperature?: number; num_ctx?: number; signal?:AbortSignal }): Promise<{ text: string; ms: number; tps: number }> {
   const started = Date.now();
   const res = await fetch("http://127.0.0.1:11434/api/generate", {
     method: "POST",
-    signal: AbortSignal.timeout(300000),
+    signal: AbortSignal.any([AbortSignal.timeout(300000),opts?.signal||new AbortController().signal]),
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ model, prompt, system: system || "", stream: false, options: { temperature: opts?.temperature ?? 0.7, num_ctx: opts?.num_ctx ?? 4096 } }),
   });
@@ -224,7 +224,7 @@ export async function ollamaGenerate(model: string, prompt: string, system?: str
   return { text: j.response || "", ms, tps };
 }
 
-export async function llamaCppGenerate(modelPath: string, prompt: string, system: string, opts?: { temperature?: number; contextTokens?: number; cpuThreads?: number; gpuLayers?: number | string }) {
+export async function llamaCppGenerate(modelPath: string, prompt: string, system: string, opts?: { temperature?: number; contextTokens?: number; cpuThreads?: number; gpuLayers?: number | string; signal?:AbortSignal }) {
   return generateLlama(path.join(RUNTIMES_DIR, "llama.cpp"), modelPath, prompt, system, opts || {});
 }
 

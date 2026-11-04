@@ -5,6 +5,7 @@ import { terminalHistory, appSettings } from "@/db/schema";
 import { desc, eq } from "drizzle-orm";
 import { exec } from "node:child_process";
 import path from "node:path";
+import { redactKnownSecrets } from "@/lib/ai/keys";
 import { WORKSPACE_DIR, ensureDirs, isDangerousCommand, safeJoin } from "@/lib/vex";
 
 export async function GET() {
@@ -31,14 +32,15 @@ export async function POST(req: NextRequest) {
   catch { return NextResponse.json({ error: "Working directory must be inside workspace" }, { status: 400 }); }
   if (!b.approveDangerous) return NextResponse.json({ error: "Confirm this shell command before execution. Shell commands have your Windows account permissions.", dangerous: true }, { status: 403 });
   const started = Date.now();
-  const output: string = await new Promise((resolve) => {
-    exec(cmd, { cwd, timeout: 25000, maxBuffer: 1024 * 1024 * 2, shell: process.platform === "win32" ? "powershell.exe" : "/bin/sh" }, (err, stdout, stderr) => {
-      const code = (err as { code?: number } | null)?.code ?? 0;
-      resolve(`$ ${cmd}\n(exit ${code})\n${(stdout || "")}${stderr ? `\n[stderr]\n${stderr}` : ""}`.slice(0, 8000));
+  const result = await new Promise<{ output: string; exitCode: number }>((resolve) => {
+    exec(cmd, { cwd, signal: req.signal, timeout: 25000, maxBuffer: 1024 * 1024 * 2, shell: process.platform === "win32" ? "powershell.exe" : "/bin/sh" }, (err, stdout, stderr) => {
+      const code = err ? (typeof err.code === "number" ? err.code : 1) : 0;
+      resolve({ exitCode: code, output: `$ ${cmd}\n(exit ${code})\n${(stdout || "")}${stderr ? `\n[stderr]\n${stderr}` : ""}`.slice(0, 8000) });
     });
   });
   const ms = Date.now() - started;
-  const exitCode = output.includes("(exit 0)") ? 0 : 1;
-  const [row] = await db.insert(terminalHistory).values({ command: cmd, output, exitCode, cwd, durationMs: ms }).returning();
+  const { exitCode } = result;
+  const output = await redactKnownSecrets(result.output);
+  const [row] = await db.insert(terminalHistory).values({ command: await redactKnownSecrets(cmd), output, exitCode, cwd, durationMs: ms }).returning();
   return NextResponse.json({ entry: row });
 }

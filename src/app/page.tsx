@@ -1,13 +1,19 @@
 "use client";
 
+import AIProviders from "@/components/AIProviders";
+import ModelCenter from "@/components/ModelCenter";
+import { parseSSE } from "@/lib/ai/sse";
+
 import { useCallback, useEffect, useRef, useState } from "react";
 
 /* ---------- types ---------- */
 type AnyRec = Record<string, any>;
-type NavKey = "dashboard" | "store" | "models" | "runtimes" | "workspace" | "projects" | "github" | "roblox" | "plugins" | "hardware" | "tasks" | "terminal" | "settings" | "tutorial";
+type NavKey = "providers" | "modelcenter" | "dashboard" | "store" | "models" | "runtimes" | "workspace" | "projects" | "github" | "roblox" | "plugins" | "hardware" | "tasks" | "terminal" | "settings" | "tutorial";
 type DesktopBridge = { isDesktop: boolean; getApiToken: () => Promise<string>; chooseStorageDirectory?: () => Promise<string | null>; getStoragePresets?: () => Promise<{ label: string; path: string }[]>; restartApp?: () => Promise<void> };
 
 const NAV: { key: NavKey; label: string; icon: string }[] = [
+  { key: "providers", label: "API Providers", icon: "☁" },
+  { key: "modelcenter", label: "Model Center", icon: "◈" },
   { key: "dashboard", label: "Dashboard", icon: "▦" },
   { key: "store", label: "Model Store", icon: "◈" },
   { key: "models", label: "My Models", icon: "⬢" },
@@ -89,7 +95,7 @@ export default function VexApp() {
             <div style={{ width: 30, height: 30, borderRadius: 6, background: "linear-gradient(135deg,#A855F7,#6D28D9)", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 16 }}>V</div>
             <div>
               <div className="font-bold text-[15px] leading-tight">Vex AI Center</div>
-              <div className="text-[11px]" style={{ color: "#A1A1AA" }}>Local AI Platform · v1.0</div>
+              <div className="text-[11px]" style={{ color: "#A1A1AA" }}>AI Platform · v0.2.0</div>
             </div>
           </div>
           <div className="mt-3 flex items-center gap-2 text-[11px]" style={{ color: "#A1A1AA" }}>
@@ -109,12 +115,14 @@ export default function VexApp() {
           <div className="flex justify-between"><span>Models</span><span className="text-white">{dash?.counts?.models ?? "–"}</span></div>
           <div className="flex justify-between"><span>Running</span><span className="text-white">{dash?.counts?.running ?? "–"}</span></div>
           <div className="flex justify-between"><span>Ollama</span><span style={{ color: dash?.ollama?.available ? "#22c55e" : "#f87171" }}>{dash?.ollama?.available ? "reachable" : "offline"}</span></div>
-          <div className="mt-1">100% local inference · no cloud APIs</div>
+          <div className="mt-1">Local + optional cloud AI</div>
         </div>
       </aside>
 
       {/* Main */}
       <main className="flex-1 overflow-y-auto p-5" style={{ minWidth: 0 }}>
+        {nav === "providers" && <AIProviders api={api} />}
+        {nav === "modelcenter" && <ModelCenter api={api} select={(model) => { sessionStorage.setItem("acenter-selected-model", model); setNav("workspace"); }} />}
         {nav === "dashboard" && <DashboardView dash={dash} reload={loadDash} go={setNav} />}
         {nav === "store" && <StoreView />}
         {nav === "models" && <ModelsView />}
@@ -125,7 +133,7 @@ export default function VexApp() {
         {nav === "roblox" && <RobloxView />}
         {nav === "plugins" && <PluginsView />}
         {nav === "hardware" && <HardwareView />}
-        {nav === "tasks" && <TasksView />}
+        {nav === "tasks" && <TasksView go={setNav} />}
         {nav === "terminal" && <TerminalView />}
         {nav === "settings" && <SettingsView />}
         {nav === "tutorial" && <TutorialView go={setNav} />}
@@ -142,6 +150,7 @@ function TutorialView({ go }: { go: (n: NavKey) => void }) {
     { title: "3 · Bu laptopta Luau Devstral çalıştır", text: "Model Store'daki RX 6700M hızlı seçeneği Luau Devstral Q2_K dosyasını indirir. Bu yaklaşık 8.89 GB ağırlığındadır. Settings değil, Runtime Manager → Apply hybrid profile ile 8 CPU thread, auto VRAM layers ve 4K context ayarla. Vulkan destekli Windows llama.cpp paketindeki llama-cli.exe ve yan DLL'leri ekrandaki llama.cpp runtime klasörüne koy; sonra AI Workspace'te modeli seç." },
     { title: "4 · Hibrit çalışma ne yapar?", text: "llama.cpp --n-gpu-layers auto ve --fit on ile GPU belleğine sığan katmanları RX 6700M'e, kalanını 32 GB sistem belleği ve Ryzen 7 5800H işlemciye bırakır. Modelin tamamı VRAM'e sığmak zorunda değildir; CPU/RAM desteği hızın düşmesine yol açabilir. GPU layers alanında auto önerilir. Bağlamı 4K'dan başlat; bellek veya hız sorunu olursa 2K'ya indir." },
     { title: "5 · Roblox Studio bağlantısı", text: "Roblox Integration → Download Plugin; .luau dosyasını Studio Plugins klasörüne koy. Studio'da HTTP requests'i etkinleştir, eklentiyi açıp Connect to Studio'ya bas. Komutlar bu bilgisayardaki A-Center ile Studio arasında yerel bağlantıdan gider." },
+    { title: "6 · EVREN / NVIDIA ve ajan araçları", text: "API Providers → anahtarını kaydet, EVREN şartlarını okuyup onayla, sağlayıcıyı etkinleştir ve modelleri yenile. Model Center'dan model seç. AI Workspace'te Agent modu ve proje seçilirse doğrulanmış tool calling modelleri araç önerileri üretebilir. Öneriyi inceleyip onayla veya reddet; gerçek sonuçlarla ajanı devam ettir. Terminal için projenin terminal iznini ayrıca açmalısın. Bulut mesajları, ekler ve onaylı araç sonuçları sağlayıcıya gönderilir." },
     { title: "Sorun giderme", text: "D: taşıma cross-origin hatası verirse A-Center'ı güncel kurulum paketiyle yeniden kurup tekrar dene. Taşıma etkin indirme/runtime varken başlamaz. Hugging Face araması için internet gerekir. GGUF sohbeti için Vulkan destekli llama-cli.exe şarttır; yoksa Runtime Manager'daki gösterilen klasöre ekle. İndirme tamamlandı ama model çalışmıyorsa llama-cli sürümünü ve modelin My Models'daki dosya yolunu kontrol et." },
   ];
   return <div>
@@ -218,7 +227,7 @@ function DashboardView({ dash, reload, go }: { dash: any; reload: () => void; go
       <div className="vex-panel p-4 mt-4">
         <div className="font-semibold mb-1">Offline-first guarantee</div>
         <div className="text-[13px]" style={{ color: "#A1A1AA" }}>
-          Internet is used <b className="text-white">only</b> for downloads (models, runtimes, plugins, git sync). Inference, chat, project editing, Roblox bridge, tasks and hardware monitoring run fully offline. No telemetry, no cloud AI APIs, no mandatory online checks.
+          Local models run on this computer. Optional EVREN and NVIDIA models send selected chat context and approved tool results to their provider. Downloads and git sync also require internet.
         </div>
       </div>
     </div>
@@ -559,57 +568,107 @@ function WorkspaceView() {
   const [engine, setEngine] = useState("");
   const [sending, setSending] = useState(false);
   const [attach, setAttach] = useState("");
+  const [activity,setActivity]=useState("");
+  const [thinking,setThinking]=useState<boolean|undefined>(undefined);
+  const [effort,setEffort]=useState("");
+  const [maxTokens,setMaxTokens]=useState(2048);
+  const [image,setImage]=useState("");
+  const [projectId,setProjectId]=useState("");
+  const [projects,setProjects]=useState<any[]>([]);
+  const [calls,setCalls]=useState<any[]>([]);
+  const [modelError,setModelError]=useState("");
+  const abortRef=useRef<AbortController|null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   const loadConvs = useCallback(async (id?: string) => {
     const r = await api(id ? `/api/chat?conversationId=${id}` : "/api/chat");
     setConvs(r.conversations || []);
-    if (id && r.messages) setMsgs(r.messages);
+    if (id && r.messages) { setMsgs(r.messages); setCalls((await api(`/api/ai/tools?conversationId=${id}`)).calls || []); }
     return r;
   }, []);
   useEffect(() => {
-    loadConvs().then((r) => {
-      if (r.conversations?.[0]) { setCid(r.conversations[0].id); loadConvs(r.conversations[0].id); const c = r.conversations[0]; setMode(c.mode); setSys(c.systemPrompt || ""); setTemp(c.temperature); setCtx(c.contextTokens); setModelId(c.modelId || ""); setPlanning(c.planningModel || ""); setCoding(c.codingModel || ""); setUtility(c.utilityModel || ""); }
+    const initial=setTimeout(()=>{
+    loadConvs().then(async (r) => {
+      if (r.conversations?.[0]) { setCid(r.conversations[0].id); await loadConvs(r.conversations[0].id); const c = r.conversations[0]; setMode(c.mode); setSys(c.systemPrompt || ""); setTemp(c.temperature); setCtx(c.contextTokens); setModelId(c.modelId || ""); setPlanning(c.planningModel || ""); setCoding(c.codingModel || ""); setUtility(c.utilityModel || ""); setProjectId(c.providerData?.projectId||""); setThinking(c.providerData?.thinking); setEffort(c.providerData?.effort||""); setMaxTokens(c.providerData?.maxTokens||2048); }
+      const preferred=sessionStorage.getItem("acenter-selected-model"); if(preferred){setModelId(preferred);sessionStorage.removeItem("acenter-selected-model");}
+      const taskText=sessionStorage.getItem("acenter-agent-task");
+      if(taskText){sessionStorage.removeItem("acenter-agent-task");const task=JSON.parse(taskText);void api("/api/chat",{method:"POST",body:JSON.stringify({action:"create",mode:"agent",title:task.title,modelId:task.model||"",providerData:{taskId:task.id,projectId:task.projectId||""}})}).then(result=>{setCid(result.conversation.id);setMode("agent");setModelId(task.model||"");setProjectId(task.projectId||"");setPrompt(task.title);setMsgs([]);void loadConvs(result.conversation.id);});}
     });
-    api("/api/models").then((r) => setModels(r.models || [])).catch(() => {});
+    api("/api/ai/models").then((r) => setModels((r.models || []).map((m:any)=>({...m,name:m.key,status:m.provider})))).catch(() => {});
+    api("/api/projects").then(r=>setProjects(r.projects||[])).catch(()=>{});
+    },0);
+    return()=>clearTimeout(initial);
   }, [loadConvs]);
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: "smooth" }); }, [msgs]);
 
+  useEffect(()=>()=>abortRef.current?.abort(),[]);
+  const selected=models.find(m=>m.name===modelId);
+  const cloud=modelId.includes("::");
+  useEffect(()=>{
+    if(!modelId.includes("::"))return;
+    let active=true;const [provider,...parts]=modelId.split("::");
+    api("/api/providers",{method:"POST",body:JSON.stringify({provider,action:"model",model:parts.join("::")})}).then(r=>{if(active){setModels(ms=>ms.map(m=>m.name===modelId?{...m,...r.model,name:modelId}:m));setModelError("");}}).catch((e:any)=>{if(active)setModelError(e.message);});
+    return()=>{active=false;};
+  },[modelId]);
   async function createConv() {
+    if(sending)return;
     const r = await api("/api/chat", { method: "POST", body: JSON.stringify({ action: "create", mode, title: "New conversation" }) });
     setCid(r.conversation.id); setMsgs([]); loadConvs(r.conversation.id);
   }
   async function saveSettings() {
     if (!cid) return;
-    await api("/api/chat", { method: "POST", body: JSON.stringify({ action: "update", conversationId: cid, mode, modelId, systemPrompt: sys, temperature: temp, contextTokens: ctx, planningModel: planning, codingModel: coding, utilityModel: utility }) });
+    await api("/api/chat", { method: "POST", body: JSON.stringify({ action: "update", conversationId: cid, mode, modelId, systemPrompt: sys, temperature: temp, contextTokens: ctx, planningModel: planning, codingModel: coding, utilityModel: utility, providerData: { projectId, thinking, effort, maxTokens } }) });
   }
-  async function send() {
-    if (!cid || !prompt.trim() || sending) return;
-    setSending(true);
-    const p = prompt; setPrompt("");
-    setMsgs((m) => [...m, { role: "user", content: p, createdAt: new Date().toISOString() }]);
+  async function send(continuation=false) {
+    if (!cid || (!continuation&&!prompt.trim()) || sending) return;
+    setSending(true);setActivity("İstek hazırlanıyor");
+    const abort=new AbortController();abortRef.current=abort;
+    const p=prompt;if(!continuation)setPrompt("");
+    if(!continuation)setMsgs(m=>[...m,{role:"user",content:p,createdAt:new Date().toISOString()}]);
+    const streamId=crypto.randomUUID();let streamed=false;
     try {
       await saveSettings();
-      const r = await api("/api/chat", { method: "POST", body: JSON.stringify({ conversationId: cid, prompt: p, modelId, attachment: attach }) });
-      setEngine(r.engine || "");
-      // Render the completed response.
-      setMsgs((m) => [...m, r.message]);
-    } catch (e: any) {
-      setMsgs((m) => [...m, { role: "assistant", content: `Error: ${e.message}`, createdAt: new Date().toISOString() }]);
-    }
-    setSending(false);
+      const desktop=(window as Window & {vexDesktop?:DesktopBridge}).vexDesktop;
+      const token=desktop?.isDesktop?await desktop.getApiToken():"";
+      setActivity("Modele bağlanılıyor");
+      const response=await fetch("/api/chat",{method:"POST",signal:abort.signal,headers:{"content-type":"application/json",...(token?{"x-vex-local-token":token}:{})},body:JSON.stringify({conversationId:cid,prompt:continuation?undefined:p,continue:continuation,modelId,attachment:attach,maxTokens,thinking,effort:(selected?.capabilities?.effortValues?.includes(effort)||(!selected?.capabilities?.effortValues&&(selected?.capabilities?.parameters?.includes("reasoning_effort")||selected?.capabilities?.reasoningStyle==="effort")))?effort||undefined:undefined,images:image&&selected?.capabilities?.vision?[image]:undefined})});
+      if(!response.ok){const error=await response.json();throw Error(`${error.error}${error.retryAfter!==undefined?` · Retry-After: ${error.retryAfter}s`:""}`);}
+      if(response.headers.get("content-type")?.includes("text/event-stream")){
+        streamed=true;setMsgs(m=>[...m,{role:"assistant",content:"",metadata:{},_streamId:streamId}]);
+        let done=false;
+        for await(const frame of parseSSE(response.body!,abort.signal)){
+          const event=JSON.parse(frame.data);
+          if(event.type==="status")setActivity(({preparing:"İstek hazırlanıyor",connecting:"Modele bağlanılıyor",connected:"Bağlantı kuruldu",thinking:"Model düşünüyor",generating:"Yanıt üretiliyor",tool_proposed:"Araç çağrısı hazırlanıyor"} as Record<string,string>)[event.status]||event.status);
+          if(event.type==="text")setMsgs(m=>m.map(x=>x._streamId===streamId?{...x,content:x.content+event.text}:x));
+          if(event.type==="reasoning")setMsgs(m=>m.map(x=>x._streamId===streamId?{...x,metadata:{...x.metadata,reasoning:(x.metadata?.reasoning||"")+event.text}}:x));
+          if(event.type==="error")throw Error(`${event.error} (${event.code})${event.retryAfter!==undefined?` · Retry-After ${event.retryAfter}s`:""}`);
+          if(event.type==="done"){done=true;setEngine(event.engine);setMsgs(m=>m.map(x=>x._streamId===streamId?event.message:x));setCalls((await api(`/api/ai/tools?conversationId=${cid}`)).calls||[]);setActivity(event.needsApproval?"Araç çağrısı için onay bekleniyor":event.truncated?"Yanıt token sınırında kesildi":"Görev tamamlandı");}
+        }
+        if(!done)throw Error("Akış tamamlanmadan bağlantı kesildi");
+      }else{const r=await response.json();setEngine(r.engine||"");setMsgs(m=>[...m,r.message]);setActivity("Görev tamamlandı");}
+    }catch(e:any){const error=abort.signal.aborted?"İstek iptal edildi":e.message;setActivity(error);if(streamed)setMsgs(m=>m.map(x=>x._streamId===streamId?{...x,metadata:{...x.metadata,interrupted:true},content:x.content+`\n[${error}]`}:x));else setMsgs(m=>[...m,{role:"assistant",content:`Error: ${error}`,metadata:{interrupted:true}}]);}
+    finally{setSending(false);abortRef.current=null;}
   }
+  async function decide(call:any,decision:string){
+    if(decision==="approve"&&!confirm(`Bu araç işlemini onaylıyor musun? Terminal komutları Windows hesabının izinleriyle çalışır.\n\n${call.name}\n${JSON.stringify(call.args,null,2)}`))return;
+    const abort=new AbortController();abortRef.current=abort;
+    setSending(true);setActivity(call.name==="write_file"?"Dosya düzenleniyor":call.name==="run_terminal"&&call.args.purpose==="test"?"Test çalıştırılıyor":"Araç çalıştırılıyor");
+    try{await api("/api/ai/tools",{method:"POST",signal:abort.signal,body:JSON.stringify({id:call.id,decision})});await loadConvs(cid);setActivity("Araç sonucu kaydedildi; ajanı devam ettirebilirsin.");}catch(e:any){setActivity(abort.signal.aborted?"İptal istendi; araç durumu yenilendiğinde kontrol et.":e.message);}finally{setSending(false);abortRef.current=null;}
+  }
+  const lastAssistant=[...msgs].reverse().find(m=>m.role==="assistant");
+  const canContinue=lastAssistant?.metadata?.toolCalls?.length&&calls.filter(c=>c.messageId===lastAssistant.id).every(c=>!["proposed","executing"].includes(c.state));
 
   const cur = convs.find((c) => c.id === cid);
   return (
     <div>
       <h1 className="text-xl font-bold mb-1">AI Workspace</h1>
-      <p className="text-[13px] mb-3" style={{ color: "#A1A1AA" }}>Local chat + coding + agent. Engine: <b className="text-white">{engine || "—"}</b> {engine.includes("fallback") && "(Ollama unreachable — start a runtime for real tokens)"}</p>
+      <p className="text-[13px] mb-3" style={{ color: "#A1A1AA" }}>Yerel / bulut sohbet ve onaylı ajan araçları. Engine: <b className="text-white">{engine || "—"}</b> {engine.includes("fallback") && "(Ollama unreachable — start a runtime for real tokens)"}</p>
+      <div className="vex-panel p-2 mb-3 text-[12px]" role="status">{activity || "Hazır"}{modelError&&<span className="text-red-400"> · {modelError}</span>}{sending&&<button className="vex-btn-danger ml-2" onClick={()=>abortRef.current?.abort()}>İsteği durdur</button>}</div>
       <div className="grid gap-3" style={{ gridTemplateColumns: "250px 1fr 260px" }}>
         <div className="vex-panel p-2">
           <button className="vex-btn w-full mb-2" onClick={createConv}>+ New chat</button>
           {(convs || []).map((c) => (
-            <div key={c.id} className={`vex-nav ${cid === c.id ? "active" : ""}`} style={{ cursor: "pointer" }} onClick={async () => { setCid(c.id); const r = await loadConvs(c.id); setMode(c.mode); setSys(c.systemPrompt || ""); setTemp(c.temperature); setCtx(c.contextTokens); setModelId(c.modelId || ""); setPlanning(c.planningModel || ""); setCoding(c.codingModel || ""); setUtility(c.utilityModel || ""); void r; }}>
+            <div key={c.id} className={`vex-nav ${cid === c.id ? "active" : ""}`} style={{ cursor: "pointer" }} onClick={async () => { if(sending)return; setCid(c.id); const r = await loadConvs(c.id); setMode(c.mode); setSys(c.systemPrompt || ""); setTemp(c.temperature); setCtx(c.contextTokens); setModelId(c.modelId || ""); setPlanning(c.planningModel || ""); setCoding(c.codingModel || ""); setUtility(c.utilityModel || ""); setProjectId(c.providerData?.projectId||""); setThinking(c.providerData?.thinking); setEffort(c.providerData?.effort||""); setMaxTokens(c.providerData?.maxTokens||2048); void r; }}>
               <span className="truncate flex-1">{c.title}</span>
               <button className="text-[11px]" style={{ color: "#71717a" }} onClick={async (e) => { e.stopPropagation(); if (confirm("Delete conversation?")) { await api("/api/chat", { method: "POST", body: JSON.stringify({ action: "delete", conversationId: c.id }) }); setCid(""); setMsgs([]); loadConvs(); } }}>✕</button>
             </div>
@@ -619,8 +678,11 @@ function WorkspaceView() {
           <div className="flex-1 overflow-y-auto space-y-2 mb-2" style={{ maxHeight: 440 }}>
             {msgs.map((m, i) => (
               <div key={i} className="p-2.5" style={{ background: m.role === "user" ? "rgba(168,85,247,.12)" : "#131318", borderRadius: 6 }}>
-                <div className="text-[11px] mb-1" style={{ color: m.role === "user" ? "#A855F7" : "#71717a" }}>{m.role === "user" ? "YOU" : `VEX · ${m.tokens || 0} tok${m.genMs ? ` · ${m.genMs}ms · ${m.tokensPerSec || 0} t/s` : ""}`}</div>
+                <div className="text-[11px] mb-1" style={{ color: m.role === "user" ? "#A855F7" : "#71717a" }}>{m.role === "user" ? "YOU" : m.role==="tool" ? "TOOL RESULT" : m.metadata?.provider ? `VEX · ${m.metadata.usage ? `${m.tokens} output tok` : "usage unavailable"}${m.genMs ? ` · ${m.genMs}ms` : ""}` : `VEX · ${m.tokens || 0} tok${m.genMs ? ` · ${m.genMs}ms · ${m.tokensPerSec || 0} t/s` : ""}`}</div>
+                {m.role==="tool"&&<div className="text-[11px] text-purple-400">GERÇEK ARAÇ SONUCU</div>}
+                {m.metadata?.reasoning&&<details><summary className="text-[12px] text-purple-400">Sağlayıcının reasoning çıktısı</summary><pre className="vex-pre text-[12px]">{m.metadata.reasoning}</pre></details>}
                 <pre className="vex-pre text-[13px]">{m.content}</pre>
+                {m.metadata?.usage&&<details className="text-[11px]"><summary>API kullanımı · {m.metadata.finishReason}</summary><pre className="vex-pre">{JSON.stringify(m.metadata.usage,null,2)}</pre></details>}
               </div>
             ))}
             {msgs.length === 0 && <div className="text-[13px]" style={{ color: "#71717a" }}>{cid ? "No messages yet. Set your models on the right, then ask anything — inference stays on this machine." : "Create or select a conversation."}</div>}
@@ -629,11 +691,12 @@ function WorkspaceView() {
           <input className="vex-input mb-2" placeholder="Optional: paste file/error context to attach" value={attach} onChange={(e) => setAttach(e.target.value)} />
           <div className="flex gap-2">
             <input className="vex-input" placeholder={cur ? `Message (${cur.mode})… Enter to send` : "Select a conversation"} value={prompt} onChange={(e) => setPrompt(e.target.value)} onKeyDown={(e) => e.key === "Enter" && send()} disabled={!cid || sending} />
-            <button className="vex-btn" onClick={send} disabled={!cid || sending}>{sending ? "Model yanıtı hazırlanıyor…" : "Send"}</button>
+            <button className="vex-btn" onClick={()=>send()} disabled={!cid || sending}>{sending ? "Model yanıtı hazırlanıyor…" : "Send"}</button>
           </div>
         </div>
         <div className="vex-panel p-3 text-[13px] space-y-2">
           <div className="font-semibold">Session config</div>
+          <p className="text-[11px] text-zinc-400">{cloud?"Bulut seçili: mesaj ve onaylı araç sonuçları sağlayıcıya gönderilir.":"Yerel inference"}</p>
           <label style={{ color: "#A1A1AA" }} className="text-[12px]">Mode<select className="vex-input mt-1" value={mode} onChange={(e) => setMode(e.target.value)}><option value="chat">General chat</option><option value="code">Coding</option><option value="agent">Agent</option><option value="vision">Vision</option></select></label>
           <label style={{ color: "#A1A1AA" }} className="text-[12px]">Primary model<select className="vex-input mt-1" value={modelId} onChange={(e) => setModelId(e.target.value)}><option value="">(auto by mode)</option>{models.map((m) => <option key={m.id} value={m.name}>{m.name} [{m.status}]</option>)}</select></label>
           <label style={{ color: "#A1A1AA" }} className="text-[12px]">Planning model<select className="vex-input mt-1" value={planning} onChange={(e) => setPlanning(e.target.value)}><option value="">—</option>{models.map((m) => <option key={m.id} value={m.name}>{m.name}</option>)}</select></label>
@@ -644,9 +707,19 @@ function WorkspaceView() {
             <label style={{ color: "#A1A1AA" }} className="text-[12px]">Temp<input className="vex-input mt-1" type="number" step={0.1} min={0} max={2} value={temp} onChange={(e) => setTemp(Number(e.target.value))} /></label>
             <label style={{ color: "#A1A1AA" }} className="text-[12px]">Context<input className="vex-input mt-1" type="number" value={ctx} onChange={(e) => setCtx(Number(e.target.value))} /></label>
           </div>
+          {cloud&&<>
+            <label className="block text-[12px]">Çıktı + reasoning token bütçesi<input className="vex-input" type="number" min={1} max={selected?.capabilities?.maxOutput||131072} value={maxTokens} onChange={e=>setMaxTokens(Number(e.target.value))}/></label>
+            {selected?.capabilities?.thinking&&<label className="block text-[12px]">Düşünme modu<select className="vex-input" value={thinking===undefined?"default":String(thinking)} onChange={e=>setThinking(e.target.value==="default"?undefined:e.target.value==="true")}><option value="default">Model varsayılanı</option><option value="true">Açık</option><option value="false">Kapalı</option></select></label>}
+            {!!selected?.capabilities?.effortValues?.length&&<label className="block text-[12px]">Reasoning effort<select className="vex-input" value={effort} onChange={e=>setEffort(e.target.value)}><option value="">Model varsayılanı</option>{selected.capabilities.effortValues.map((v:string)=><option key={v}>{v}</option>)}</select></label>}
+            {!selected?.capabilities?.effortValues&&(selected?.capabilities?.parameters?.includes("reasoning_effort")||selected?.capabilities?.reasoningStyle==="effort")&&<label className="block text-[12px]">Reasoning effort (değeri API doğrular)<input className="vex-input" value={effort} onChange={e=>setEffort(e.target.value)} placeholder="Boş: model varsayılanı"/></label>}
+            {selected?.capabilities?.vision&&<input className="vex-input" placeholder="Görsel HTTPS URL (isteğe bağlı)" value={image} onChange={e=>setImage(e.target.value)}/>}
+            <p className="text-[11px] text-zinc-400">Tools: {selected?.capabilities?.tools===true?"destekleniyor":"doğrulanmadı; araç gönderilmez"}. Reasoning metni yalnız API sağlarsa gösterilir.</p>
+          </>}
+          {mode==="agent"&&<label className="block text-[12px]">Araçların erişeceği proje<select className="vex-input" value={projectId} onChange={e=>setProjectId(e.target.value)}><option value="">Proje seç (araçlar kapalı)</option>{projects.map(p=><option key={p.id} value={p.id}>{p.name} · {p.permissionMode}</option>)}</select></label>}
           <button className="vex-btn-ghost w-full" onClick={saveSettings}>Save session</button>
         </div>
       </div>
+      {calls.length>0&&<section className="vex-panel p-3 mt-3"><h2 className="font-semibold mb-2">Ajan araç önerileri ve gerçek sonuçlar</h2>{calls.slice(-20).map(call=><details key={call.id} open={call.state==="proposed"} className="mb-3"><summary className="text-[13px]">{call.name} · {call.state}</summary><pre className="vex-pre text-[12px] max-h-64 overflow-auto">{JSON.stringify(call.args,null,2)}</pre>{call.output&&<pre className="vex-pre text-[12px] max-h-64 overflow-auto">{call.output}</pre>}{call.state==="proposed"&&<div className="flex gap-2"><button className="vex-btn" disabled={sending} onClick={()=>decide(call,"approve")}>İşlemi onayla ve çalıştır</button><button className="vex-btn-danger" disabled={sending} onClick={()=>decide(call,"reject")}>Reddet</button></div>}</details>)}{canContinue&&<button className="vex-btn" disabled={sending} onClick={()=>send(true)}>Gerçek araç sonuçlarıyla ajanı devam ettir</button>}</section>}
     </div>
   );
 }
@@ -1044,7 +1117,7 @@ function HardwareView() {
 }
 
 /* ================= TASKS ================= */
-function TasksView() {
+function TasksView({go}:{go:(nav:NavKey)=>void}) {
   const [tasks, setTasks] = useState<any[]>([]);
   const [msg, setMsg] = useState("");
   const [form, setForm] = useState({ title: "", kind: "general", assignedModel: "" });
@@ -1052,7 +1125,7 @@ function TasksView() {
   const load = useCallback(async () => { try { const r = await api("/api/tasks"); setTasks(r.tasks || []); } catch (e: any) { setMsg(e.message); } }, []);
   useEffect(() => {
     const initial = setTimeout(() => {
-      load(); api("/api/models").then((r) => setModels(r.models || [])).catch(() => {});
+      load(); api("/api/ai/models").then((r) => setModels((r.models || []).map((m:any)=>({...m,name:m.key})))).catch(() => {});
     }, 0);
     const t = setInterval(load, 2500); return () => clearInterval(t);
   }, [load]);
@@ -1068,8 +1141,8 @@ function TasksView() {
   }
   return (
     <div>
-      <div className="flex items-center justify-between mb-1"><h1 className="text-xl font-bold">Task Manager · Manual planner</h1></div>
-      <p className="text-[13px] mb-3" style={{ color: "#A1A1AA" }}>Manual checklist: carry out each step in AI Workspace / Project Manager, then mark it done. No automatic code execution or test verification.</p>
+      <div className="flex items-center justify-between mb-1"><h1 className="text-xl font-bold">Task Manager · Plans + Agent runs</h1></div>
+      <p className="text-[13px] mb-3" style={{ color: "#A1A1AA" }}>Plan checklist steps are marked manually. Open Agent Engine to request real tool proposals; file, terminal and Git operations require separate approval.</p>
       {msg && <div className="vex-panel p-2.5 mb-3 text-[13px]">{msg}</div>}
       <div className="vex-panel p-3 mb-3">
         <div className="grid gap-2" style={{ gridTemplateColumns: "2fr 1fr 1fr auto" }}>
@@ -1097,6 +1170,7 @@ function TasksView() {
           <div className="flex flex-wrap gap-2 mt-2">
             {t.status !== "completed" && t.status !== "cancelled" && <button className="vex-btn" onClick={() => { if (confirm("Have you manually completed and checked this step?")) run("complete-step", t.id); }}>Mark current step done</button>}
             {t.status !== "completed" && t.status !== "cancelled" && <button className="vex-btn-danger" onClick={() => run("cancel", t.id)}>Cancel</button>}
+            <button className="vex-btn" onClick={()=>{sessionStorage.setItem("acenter-agent-task",JSON.stringify({id:t.id,title:t.title,model:t.assignedModel,projectId:t.projectId}));go("workspace");}}>Open with Agent Engine</button>
             <button className="vex-btn-ghost" onClick={() => run("delete", t.id)}>Delete</button>
           </div>
         </div>
@@ -1213,7 +1287,7 @@ function SettingsView() {
         <div className="text-[12px]" style={{ color: "#A1A1AA" }}>
           <div><b className="text-white">Online only:</b> model downloads · runtime downloads · plugin downloads · git sync · update checks</div>
           <div><b className="text-white">Offline:</b> inference · chat · coding · project editing · Roblox bridge · tasks · plugins · hardware · terminal</div>
-          <div className="mt-1">Test: disconnect after setup — everything installed keeps working. No telemetry, no license phone-home.</div>
+          <div className="mt-1">Test: disconnect after setup — everything installed keeps working. Cloud providers require internet; local inference stays offline.</div>
         </div>
       </div>
     </div>

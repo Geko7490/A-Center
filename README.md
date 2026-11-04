@@ -1,5 +1,7 @@
 # A-Center
 
+Version 0.2.0 adds optional EVREN and NVIDIA Build providers with OS-encrypted API keys, real SSE/reasoning output, a unified Model Center and approval-based agent tools. See [Cloud provider setup and validation](docs/CLOUD_PROVIDERS.md). API keys are entered in API Providers after installing this version; they are not bundled with the application.
+
 Version 0.1.1 fixes Windows storage relocation and noninteractive GGUF chat. Relocation copies data and retains the source as a backup; after confirming the new location, remove only old model/download/runtime files. Keep the original `database` folder: the database remains in Electron's user data directory.
 
 For GGUF chat, place the complete matching Vulkan llama.cpp build (EXE and DLL files) in the runtime folder and select the imported model in AI Workspace. Each request runs one CLI turn with closed input; `last-inference.log` records exit status and runtime diagnostics. Task Manager is a manual checklist, not an automated coding agent. Remaining product work is tracked in [ROADMAP.md](ROADMAP.md).
