@@ -1,3 +1,4 @@
+import { storageBusy } from "@/lib/maintenance";
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { robloxBridges, robloxCommands } from "@/db/schema";
@@ -25,6 +26,7 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
+  if (storageBusy()) return NextResponse.json({ error: "Storage relocation in progress. Restart A-Center before making changes." }, { status: 409 });
   const b = await current();
   const body = await req.json().catch(() => ({}));
   const a = (body as { action?: string }).action || "";

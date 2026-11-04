@@ -1,3 +1,4 @@
+import { storageBusy } from "@/lib/maintenance";
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { tasks } from "@/db/schema";
@@ -18,6 +19,7 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
+  if (storageBusy()) return NextResponse.json({ error: "Storage relocation in progress. Restart A-Center before making changes." }, { status: 409 });
   const body = await req.json().catch(() => ({}));
   const b = body as { action?: string; id?: string; title?: string; kind?: string; assignedModel?: string; projectId?: string; steps?: { title: string; status: string; log: string }[] };
   if (!b.action || b.action === "create") {
@@ -32,26 +34,19 @@ export async function POST(req: NextRequest) {
   if (!t) return NextResponse.json({ error: "not found" }, { status: 404 });
   const steps = [...(t.steps as { title: string; status: string; log: string }[])];
 
-  if (b.action === "start" || b.action === "resume" || b.action === "step") {
-    if (t.status === "completed") return NextResponse.json({ error: "already completed" }, { status: 400 });
-    const idx = t.currentStep;
-    if (idx >= steps.length) {
-      await db.update(tasks).set({ status: "completed", progress: 1, updatedAt: new Date(), logs: (t.logs || "") + "[done] all steps complete\n" }).where(eq(tasks.id, b.id));
-      return NextResponse.json({ ok: true, status: "completed" });
-    }
-    // Execute one step (real local work: no cloud). Each step does deterministic verification.
-    steps[idx] = { ...steps[idx], status: "running" };
-    await db.update(tasks).set({ steps, status: "running", updatedAt: new Date() }).where(eq(tasks.id, b.id));
-    // Simulate real work without faking model output: record environment checks
-    const stamp = new Date().toISOString();
-    const log = `[${stamp}] step ${idx + 1}/${steps.length}: ${steps[idx].title} — executed locally${t.assignedModel ? ` (model: ${t.assignedModel})` : " (no model assigned — planner only)"}\n`;
-    steps[idx] = { ...steps[idx], status: "done", log: log.trim() };
-    const progress = (idx + 1) / steps.length;
-    const done = idx + 1 >= steps.length;
-    await db.update(tasks).set({ steps, currentStep: idx + 1, progress, status: done ? "completed" : "running", logs: (t.logs || "") + log, updatedAt: new Date() }).where(eq(tasks.id, b.id));
-    // Auto-continue unless paused: caller polls `step` until completed
-    return NextResponse.json({ ok: true, status: done ? "completed" : "running", step: idx, progress });
+  if (b.action === "complete-step") {
+    if (["completed", "cancelled"].includes(t.status)) return NextResponse.json({ error: "Task is closed" }, { status: 400 });
+    const index = t.currentStep;
+    if (!steps[index]) return NextResponse.json({ error: "No pending step" }, { status: 400 });
+    steps[index] = { ...steps[index], status: "done", log: "Manually marked complete by user; not automatically verified." };
+    await db.update(tasks).set({ steps, currentStep: index + 1, progress: (index + 1) / steps.length, status: index + 1 === steps.length ? "completed" : "paused", error: "", logs: t.logs + `Manual completion: ${steps[index].title}\n`, updatedAt: new Date() }).where(eq(tasks.id, b.id));
+    return NextResponse.json({ ok: true });
   }
+  if (b.action === "start" || b.action === "resume" || b.action === "step") {
+    await db.update(tasks).set({ status: "paused", error: "Planner only: automatic code execution is not available. No files were changed or tests run.", updatedAt: new Date() }).where(eq(tasks.id, b.id));
+    return NextResponse.json({ error: "This task is a plan. Execute and verify its steps manually in AI Workspace and Project Manager." }, { status: 409 });
+  }
+
   if (b.action === "pause") {
     await db.update(tasks).set({ status: "paused", updatedAt: new Date(), logs: (t.logs || "") + "[paused]\n" }).where(eq(tasks.id, b.id));
     return NextResponse.json({ ok: true });

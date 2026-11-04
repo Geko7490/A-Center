@@ -1,8 +1,9 @@
+import { storageBusy } from "@/lib/maintenance";
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { conversations, messages, models, runtimes } from "@/db/schema";
 import { desc, eq } from "drizzle-orm";
-import { checkOllama, ollamaGenerate, llamaCppGenerate, localFallbackReply } from "@/lib/vex";
+import { checkOllama, ollamaGenerate, llamaCppGenerate } from "@/lib/vex";
 
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
@@ -14,6 +15,7 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
+  if (storageBusy()) return NextResponse.json({ error: "Storage relocation in progress. Restart A-Center before making changes." }, { status: 409 });
   const body = await req.json().catch(() => ({}));
   const b = body as { action?: string; title?: string; mode?: string; conversationId?: string; prompt?: string; modelId?: string; systemPrompt?: string; temperature?: number; contextTokens?: number; planningModel?: string; codingModel?: string; utilityModel?: string; attachment?: string };
   if (b.action === "create") {
@@ -49,7 +51,11 @@ export async function POST(req: NextRequest) {
   const convs = await db.select().from(conversations).where(eq(conversations.id, b.conversationId));
   const conv = convs[0];
   if (!conv) return NextResponse.json({ error: "conversation not found" }, { status: 404 });
-  const fullPrompt = b.attachment ? `${b.prompt}\n\n[attached file context]\n${String(b.attachment).slice(0, 6000)}` : b.prompt;
+  let fullPrompt = b.attachment ? `${b.prompt}\n\n[attached file context]\n${String(b.attachment).slice(0, 6000)}` : b.prompt;
+  const history = await db.select().from(messages).where(eq(messages.conversationId, b.conversationId)).orderBy(messages.createdAt);
+  const contextBudget = Math.max(1024, Math.min(8192, conv.contextTokens || 4096)) * 2;
+  const previous = history.slice(-12).map((m) => `${m.role}: ${m.content}`).join("\n").slice(-contextBudget);
+  if (previous) fullPrompt = `[Previous conversation]\n${previous}\n[Current user message]\n${fullPrompt}`;
   await db.insert(messages).values({ conversationId: b.conversationId, role: "user", content: b.prompt, tokens: Math.ceil(b.prompt.length / 4) });
   // Resolve model: multi-model routing
   let activeModel = b.modelId || conv.modelId;
@@ -60,13 +66,13 @@ export async function POST(req: NextRequest) {
   }
   // Check installed models
   const installed = await db.select().from(models);
-  const selectedLocalModel = installed.find((model) => model.name === activeModel);
-  const running = installed.filter((m) => m.status === "running");
+  const selectedLocalModel = installed.find((model) => model.id === activeModel || model.name === activeModel) || (!activeModel ? installed.find((model) => model.status === "running") || installed.find((model) => model.format === "GGUF") : undefined);
   let text = "", ms = 0, tps = 0, engine = "local-fallback";
   const oc = await checkOllama();
-  const ollamaTarget = activeModel ? (oc.models.includes(activeModel) ? activeModel : "") : oc.models[0] || "";
+  const targetName = selectedLocalModel?.installPath.startsWith("ollama:") ? selectedLocalModel.installPath.slice(7) : selectedLocalModel?.name || activeModel;
+  const ollamaTarget = targetName ? oc.models.find((name) => name === targetName || name === `${targetName}:latest`) || "" : oc.models[0] || "";
   try {
-    if (selectedLocalModel?.format === "GGUF" && selectedLocalModel.installPath && !selectedLocalModel.installPath.startsWith("ollama:")) {
+    if (selectedLocalModel?.format === "GGUF" && selectedLocalModel.activeRuntime !== "ollama" && selectedLocalModel.installPath && !selectedLocalModel.installPath.startsWith("ollama:")) {
       const llamaRows = await db.select().from(runtimes).where(eq(runtimes.name, "llama.cpp"));
       const llamaConfig = (llamaRows[0]?.config || {}) as { cpuThreads?: number; gpuLayers?: number | string; ctxSize?: number };
       const r = await llamaCppGenerate(selectedLocalModel.installPath, fullPrompt, conv.systemPrompt || "", {
@@ -80,19 +86,11 @@ export async function POST(req: NextRequest) {
       const r = await ollamaGenerate(ollamaTarget, fullPrompt, conv.systemPrompt || undefined, { temperature: conv.temperature, num_ctx: conv.contextTokens });
       text = r.text; ms = r.ms; tps = r.tps; engine = `ollama:${ollamaTarget}`;
     } else {
-      const fb = localFallbackReply(fullPrompt, conv.mode, conv.systemPrompt);
-      text = fb.text + (running.length ? `\n\n_Running local models: ${running.map((m) => m.name).join(", ")} (native load not reachable from this host — start Ollama to generate real tokens.)_` : `\n\n_No running models. Start one in My Models._`);
-      tps = 0; ms = 120; engine = "vex-offline-fallback";
+      throw new Error(`Selected model/runtime is unavailable: ${activeModel || "no model selected"}. Import a GGUF in My Models or start the matching Ollama model.`);
     }
   } catch (e: unknown) {
-    if (selectedLocalModel?.format === "GGUF") {
-      text = `Local GGUF inference failed: ${e instanceof Error ? e.message : "unknown error"}`;
-      engine = "llama.cpp-error";
-    } else {
-      const fb = localFallbackReply(fullPrompt, conv.mode, conv.systemPrompt);
-      text = fb.text + `\n\n_Inference error: ${e instanceof Error ? e.message : "unknown"}. Showing offline fallback._`;
-      engine = "vex-offline-fallback";
-    }
+    return NextResponse.json({ error: e instanceof Error ? e.message : "Inference failed" }, { status: 502 });
+
   }
   const tokens = Math.ceil(text.length / 4);
   const [msg] = await db.insert(messages).values({ conversationId: b.conversationId, role: "assistant", content: text, tokens, genMs: ms, tokensPerSec: tps }).returning();

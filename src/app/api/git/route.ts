@@ -1,3 +1,4 @@
+import { storageBusy } from "@/lib/maintenance";
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { gitRepos } from "@/db/schema";
@@ -40,6 +41,7 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
+  if (storageBusy()) return NextResponse.json({ error: "Storage relocation in progress. Restart A-Center before making changes." }, { status: 409 });
   ensureDirs();
   const body = await req.json().catch(() => ({}));
   const b = body as { action?: string; id?: string; url?: string; branch?: string; localDir?: string; message?: string; files?: string[]; newBranch?: string; permission?: string };
@@ -88,7 +90,9 @@ export async function POST(req: NextRequest) {
   }
   if (b.action === "branch-create") {
     if (!b.newBranch) return NextResponse.json({ error: "newBranch required" }, { status: 400 });
-    return NextResponse.json(await git(repo.localPath, ["checkout", "-b", b.newBranch]));
+    const result = await git(repo.localPath, ["checkout", "-b", b.newBranch]);
+    if (result.ok) await db.update(gitRepos).set({ branch: b.newBranch }).where(eq(gitRepos.id, b.id));
+    return NextResponse.json(result);
   }
   if (b.action === "checkout") {
     if (!b.branch) return NextResponse.json({ error: "branch required" }, { status: 400 });

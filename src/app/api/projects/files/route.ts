@@ -1,3 +1,4 @@
+import { storageBusy } from "@/lib/maintenance";
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { projects, fileHistory, pendingChanges } from "@/db/schema";
@@ -49,6 +50,7 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
+  if (storageBusy()) return NextResponse.json({ error: "Storage relocation in progress. Restart A-Center before making changes." }, { status: 409 });
   ensureDirs();
   const body = await req.json().catch(() => ({}));
   const b = body as { projectId?: string; file?: string; content?: string; action?: string; newPath?: string; id?: string; reason?: string };
@@ -57,11 +59,15 @@ export async function POST(req: NextRequest) {
   if (!p) return NextResponse.json({ error: "project not found" }, { status: 404 });
   const action = b.action || "write";
 
+  if (p.permissionMode === "read-only" && action !== "reject") return NextResponse.json({ error: "Read-only project" }, { status: 403 });
+  if (p.permissionMode === "approval" && ["mkdir", "rename", "rollback"].includes(action)) return NextResponse.json({ error: "Switch to auto mode to perform directory changes or rollback explicitly." }, { status: 403 });
+
   // approve / reject pending
   if (action === "approve" && b.id) {
     const rows = await db.select().from(pendingChanges).where(and(eq(pendingChanges.id, b.id), eq(pendingChanges.projectId, b.projectId)));
     const pc = rows[0];
     if (!pc) return NextResponse.json({ error: "pending change not found" }, { status: 404 });
+    if (isProtected(p, pc.filePath)) return NextResponse.json({ error: "File is now protected" }, { status: 403 });
     const full = safeJoin(p.path, pc.filePath);
     if (!fs.existsSync(path.dirname(full))) fs.mkdirSync(path.dirname(full), { recursive: true });
     let prev = "";
@@ -88,7 +94,7 @@ export async function POST(req: NextRequest) {
     if (h.action === "create") { if (fs.existsSync(full)) fs.unlinkSync(full); }
     else {
       let content = h.previousContent;
-      if ((!content || !content.length) && h.backupPath) {
+      if (h.backupPath) {
         try { content = fs.readFileSync(path.join(BACKUPS_DIR, h.backupPath), "utf8"); } catch {}
       }
       if (!fs.existsSync(path.dirname(full))) fs.mkdirSync(path.dirname(full), { recursive: true });
@@ -111,6 +117,7 @@ export async function POST(req: NextRequest) {
   if (action === "rename") {
     if (!b.newPath) return NextResponse.json({ error: "newPath required" }, { status: 400 });
     if (p.permissionMode === "read-only") return NextResponse.json({ error: "Read-only mode" }, { status: 403 });
+    if (isProtected(p, rel) || isProtected(p, b.newPath)) return NextResponse.json({ error: "Protected file" }, { status: 403 });
     const dest = safeJoin(p.path, b.newPath);
     fs.mkdirSync(path.dirname(dest), { recursive: true });
     fs.renameSync(full, dest);

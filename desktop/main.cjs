@@ -129,7 +129,7 @@ app.whenReady().then(async () => {
   });
   ipcMain.handle("vex:restart-app", () => {
     app.relaunch();
-    app.exit(0);
+    app.quit();
   });
   session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
     callback({
@@ -144,6 +144,7 @@ app.whenReady().then(async () => {
     createWindow();
   } catch (error) {
     console.error(error);
+    require("electron").dialog.showErrorBox("A-Center could not start", String(error));
     app.quit();
   }
 });

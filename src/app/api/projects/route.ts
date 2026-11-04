@@ -1,10 +1,11 @@
+import { storageBusy } from "@/lib/maintenance";
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { projects, fileHistory } from "@/db/schema";
 import { desc, eq } from "drizzle-orm";
 import fs from "node:fs";
 import path from "node:path";
-import { ensureDirs, WORKSPACE_DIR, walkDir, detectLanguage } from "@/lib/vex";
+import { ensureDirs, WORKSPACE_DIR, walkDir, detectLanguage, safeJoin } from "@/lib/vex";
 
 export async function GET(req: NextRequest) {
   ensureDirs();
@@ -42,6 +43,7 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
+  if (storageBusy()) return NextResponse.json({ error: "Storage relocation in progress. Restart A-Center before making changes." }, { status: 409 });
   ensureDirs();
   const body = await req.json().catch(() => ({}));
   const b = body as { action?: string; id?: string; name?: string; path?: string; permissionMode?: string; protectedFiles?: string[]; excludedDirs?: string[]; fileSizeLimitKb?: number; terminalAllowed?: boolean };
@@ -73,7 +75,8 @@ export async function POST(req: NextRequest) {
       target = path.join(WORKSPACE_DIR, name.replace(/[^a-zA-Z0-9._-]+/g, "_"));
     }
   } else {
-    target = path.join(WORKSPACE_DIR, (b.path || name).replace(/[^a-zA-Z0-9._/-]+/g, "_"));
+    try { target = safeJoin(WORKSPACE_DIR, (b.path || name).replace(/[^a-zA-Z0-9._/-]+/g, "_")); }
+    catch { return NextResponse.json({ error: "Project path escapes workspace" }, { status: 400 }); }
   }
   if (!fs.existsSync(target)) {
     fs.mkdirSync(target, { recursive: true });

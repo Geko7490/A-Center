@@ -1,3 +1,4 @@
+import { storageBusy } from "@/lib/maintenance";
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { models } from "@/db/schema";
@@ -13,6 +14,7 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
+  if (storageBusy()) return NextResponse.json({ error: "Storage relocation in progress. Restart A-Center before making changes." }, { status: 409 });
   ensureDirs();
   const body = await req.json().catch(() => ({}));
   const { name, repo, version, format, quantization, sizeBytes, description, category, downloadUrl, installPath } = body as Record<string, unknown>;

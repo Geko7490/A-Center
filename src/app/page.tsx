@@ -137,7 +137,7 @@ export default function VexApp() {
 /* ================= KULLANIM REHBERI ================= */
 function TutorialView({ go }: { go: (n: NavKey) => void }) {
   const sections = [
-    { title: "1 · Depolama yerini D: sürücüsüne taşı", text: "Settings → D: drive → Save settings. A-Center D:\\A-Center\models, downloads, workspace, runtimes ve diğer klasörleri oluşturur; mevcut dosyaları taşır ve yeniden başlar. Taşıma sırasında indirmeleri iptal et, runtime'ları durdur ve D: sürücüsünde model boyutundan fazla boş alan bırak. PGlite veritabanı küçük kaldığı için kullanıcı profilindeki C: konumunda kalır." },
+    { title: "1 · Depolama yerini D: sürücüsüne taşı", text: "Settings → D: drive → Save settings. A-Center D:\\A-Center\models, downloads, workspace, runtimes ve diğer klasörleri oluşturur; mevcut dosyaları kopyalar ve yeniden başlar. Kaynak dosyalar yedek olarak korunur; yeni konumu doğruladıktan sonra eski model dosyalarını silebilirsin. Taşıma sırasında indirmeleri iptal et, runtime'ları durdur ve D: sürücüsünde model boyutundan fazla boş alan bırak. PGlite veritabanı küçük kaldığı için kullanıcı profilindeki C: konumunda kalır." },
     { title: "2 · Hugging Face'ten model bul ve indir", text: "Model Store'da Hugging Face kaynağını seçip model adıyla ara. Belirli bir repo için owner/name veya Hugging Face URL'sini repo kutusuna yapıştır, Load repository files'e bas. GGUF dosyaları boyut ve quant etiketiyle görünür; istediğinin Download düğmesine bas. İndirme tamamlanınca dosya My Models'a eklenir." },
     { title: "3 · Bu laptopta Luau Devstral çalıştır", text: "Model Store'daki RX 6700M hızlı seçeneği Luau Devstral Q2_K dosyasını indirir. Bu yaklaşık 8.89 GB ağırlığındadır. Settings değil, Runtime Manager → Apply hybrid profile ile 8 CPU thread, auto VRAM layers ve 4K context ayarla. Vulkan destekli Windows llama.cpp paketindeki llama-cli.exe ve yan DLL'leri ekrandaki llama.cpp runtime klasörüne koy; sonra AI Workspace'te modeli seç." },
     { title: "4 · Hibrit çalışma ne yapar?", text: "llama.cpp --n-gpu-layers auto ve --fit on ile GPU belleğine sığan katmanları RX 6700M'e, kalanını 32 GB sistem belleği ve Ryzen 7 5800H işlemciye bırakır. Modelin tamamı VRAM'e sığmak zorunda değildir; CPU/RAM desteği hızın düşmesine yol açabilir. GPU layers alanında auto önerilir. Bağlamı 4K'dan başlat; bellek veya hız sorunu olursa 2K'ya indir." },
@@ -184,8 +184,8 @@ function DashboardView({ dash, reload, go }: { dash: any; reload: () => void; go
           <div className="font-semibold mb-2">Hardware Snapshot</div>
           {hw ? (
             <div className="text-[13px] space-y-2" style={{ color: "#d4d4d8" }}>
-              <div><span style={{ color: "#A1A1AA" }}>CPU:</span> {hw.cpu.model} · {hw.cpu.cores} cores · {hw.cpu.usage}%</div>
-              <div className="vex-bar"><div style={{ width: `${hw.cpu.usage}%` }} /></div>
+              <div><span style={{ color: "#A1A1AA" }}>CPU:</span> {hw.cpu.model} · {hw.cpu.cores} cores · {hw.cpu.usage === null ? "unavailable" : `${hw.cpu.usage}%`}</div>
+              <div className="vex-bar"><div style={{ width: `${hw.cpu.usage === null ? "unavailable" : `${hw.cpu.usage}%`}` }} /></div>
               <div><span style={{ color: "#A1A1AA" }}>RAM:</span> {fmtBytes(hw.mem.total - hw.mem.free)} / {fmtBytes(hw.mem.total)} ({memPct}%)</div>
               <div className="vex-bar"><div style={{ width: `${memPct}%` }} /></div>
               <div><span style={{ color: "#A1A1AA" }}>GPU:</span> {hw.gpus?.length ? hw.gpus.map((g: any) => `${g.name} (${g.backend})`).join(", ") : "no discrete GPU detected — CPU fallback ready"}</div>
@@ -433,7 +433,7 @@ function ModelsView() {
         <h1 className="text-xl font-bold">My Models</h1>
         <button className="vex-btn" onClick={checkAll} disabled={testing}>{testing ? "Testing…" : "✓ Check Models"}</button>
       </div>
-      <p className="text-[13px] mb-3" style={{ color: "#A1A1AA" }}>A model is <b className="text-white">working</b> only after files validate, runtime + hardware checks pass, and a real prompt returns output. Multiple versions supported.</p>
+      <p className="text-[13px] mb-3" style={{ color: "#A1A1AA" }}>Inference starts on demand in AI Workspace. A model is <b className="text-white">working</b> only after files validate, runtime + hardware checks pass, and a real prompt returns output. Multiple versions supported.</p>
       {msg && <div className="vex-panel p-2.5 mb-3 text-[13px] vex-pre" style={{ borderColor: "#A855F7" }}>{msg}</div>}
       {testReport && (
         <div className="grid gap-3 mb-3" style={{ gridTemplateColumns: "repeat(auto-fit,minmax(260px,1fr))" }}>
@@ -466,7 +466,7 @@ function ModelsView() {
             <div className="text-[11px] mt-1" style={{ color: "#71717a" }}>Runtimes: {(m.runtimes || []).join(", ")} · active: <b className="text-white">{m.activeRuntime}</b> · compat: {m.compatibilityStatus} · used: {timeAgo(m.lastUsedAt)}</div>
             <div className="text-[12px] mt-1" style={{ color: "#A1A1AA" }}>{m.description}</div>
             <div className="flex flex-wrap gap-2 mt-2">
-              {m.status !== "running" ? <button className="vex-btn" disabled={!!busy} onClick={() => act(m.id, "start")}>Start</button>
+              {m.status !== "running" ? <button className="vex-btn" disabled={!!busy} onClick={() => act(m.id, "start")}>Check readiness</button>
                 : <button className="vex-btn-ghost" disabled={!!busy} onClick={() => act(m.id, "stop")}>Stop</button>}
               <button className="vex-btn-ghost" disabled={!!busy} onClick={() => act(m.id, "test")}>Test</button>
               <select className="vex-input" style={{ width: 130 }} value={m.activeRuntime} onChange={(e) => act(m.id, "set-runtime", { runtime: e.target.value })}>
@@ -524,7 +524,6 @@ function RuntimesView() {
             <div className="grid gap-2 mt-2" style={{ gridTemplateColumns: "1fr 1fr 1fr" }}>
               <label className="text-[11px]" style={{ color: "#A1A1AA" }}>CPU threads<input className="vex-input mt-1" type="number" defaultValue={r.config?.cpuThreads ?? 8} onChange={(e) => setCfg({ ...cfg, [r.name]: { ...(cfg[r.name] || {}), cpuThreads: Number(e.target.value) } })} /></label>
               <label className="text-[11px]" style={{ color: "#A1A1AA" }}>GPU layers (auto/number)<input className="vex-input mt-1" type="text" defaultValue={r.config?.gpuLayers ?? "auto"} onChange={(e) => { const raw = e.target.value; setCfg({ ...cfg, [r.name]: { ...(cfg[r.name] || {}), gpuLayers: /^\d+$/.test(raw) ? Number(raw) : raw } }); }} /></label>
-              <label className="text-[11px]" style={{ color: "#A1A1AA" }}>Ctx size<input className="vex-input mt-1" type="number" defaultValue={r.config?.ctxSize ?? 4096} onChange={(e) => setCfg({ ...cfg, [r.name]: { ...(cfg[r.name] || {}), ctxSize: Number(e.target.value) } })} /></label>
               <label className="text-[11px]" style={{ color: "#A1A1AA" }}>Ctx size<input className="vex-input mt-1" type="number" defaultValue={r.config?.ctxSize ?? 4096} onChange={(e) => setCfg({ ...cfg, [r.name]: { ...(cfg[r.name] || {}), ctxSize: Number(e.target.value) } })} /></label>
             </div>
             <div className="flex flex-wrap gap-2 mt-2">
@@ -593,17 +592,8 @@ function WorkspaceView() {
       await saveSettings();
       const r = await api("/api/chat", { method: "POST", body: JSON.stringify({ conversationId: cid, prompt: p, modelId, attachment: attach }) });
       setEngine(r.engine || "");
-      // streaming effect: reveal progressively
-      const full: string = r.message.content;
-      let shown = "";
-      setMsgs((m) => [...m, { ...r.message, content: "" }]);
-      const chunks = full.match(/[\s\S]{1,120}/g) || [full];
-      for (const c of chunks) {
-        shown += c;
-        const s = shown;
-        setMsgs((m) => m.map((x, i) => (i === m.length - 1 ? { ...x, content: s } : x)));
-        await new Promise((res) => setTimeout(res, 30));
-      }
+      // Render the completed response.
+      setMsgs((m) => [...m, r.message]);
     } catch (e: any) {
       setMsgs((m) => [...m, { role: "assistant", content: `Error: ${e.message}`, createdAt: new Date().toISOString() }]);
     }
@@ -639,7 +629,7 @@ function WorkspaceView() {
           <input className="vex-input mb-2" placeholder="Optional: paste file/error context to attach" value={attach} onChange={(e) => setAttach(e.target.value)} />
           <div className="flex gap-2">
             <input className="vex-input" placeholder={cur ? `Message (${cur.mode})… Enter to send` : "Select a conversation"} value={prompt} onChange={(e) => setPrompt(e.target.value)} onKeyDown={(e) => e.key === "Enter" && send()} disabled={!cid || sending} />
-            <button className="vex-btn" onClick={send} disabled={!cid || sending}>{sending ? "…" : "Send"}</button>
+            <button className="vex-btn" onClick={send} disabled={!cid || sending}>{sending ? "Model yanıtı hazırlanıyor…" : "Send"}</button>
           </div>
         </div>
         <div className="vex-panel p-3 text-[13px] space-y-2">
@@ -1024,7 +1014,7 @@ function HardwareView() {
     <div>
       <div className="flex items-center justify-between mb-3"><h1 className="text-xl font-bold">Hardware Monitor</h1><button className="vex-btn-ghost" onClick={() => load(true)}>Refresh + estimate</button></div>
       <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(auto-fit,minmax(300px,1fr))" }}>
-        <div className="vex-panel p-4"><div className="font-semibold mb-2">CPU</div><div className="text-[13px]">{hw.cpu.model}</div><div className="text-[12px]" style={{ color: "#A1A1AA" }}>{hw.cpu.cores} cores · {hw.cpu.arch} · load {hw.cpu.load1?.toFixed?.(1)} · {hw.cpu.usage}%</div><div className="vex-bar mt-2"><div style={{ width: `${hw.cpu.usage}%` }} /></div></div>
+        <div className="vex-panel p-4"><div className="font-semibold mb-2">CPU</div><div className="text-[13px]">{hw.cpu.model}</div><div className="text-[12px]" style={{ color: "#A1A1AA" }}>{hw.cpu.cores} cores · {hw.cpu.arch} · load {hw.cpu.load1?.toFixed?.(1)} · {hw.cpu.usage === null ? "unavailable" : `${hw.cpu.usage}%`}</div><div className="vex-bar mt-2"><div style={{ width: `${hw.cpu.usage === null ? "unavailable" : `${hw.cpu.usage}%`}` }} /></div></div>
         <div className="vex-panel p-4"><div className="font-semibold mb-2">RAM</div><div className="text-[13px]">{fmtBytes(hw.mem.total - hw.mem.free)} / {fmtBytes(hw.mem.total)} ({memPct}%)</div><div className="vex-bar mt-2"><div style={{ width: `${memPct}%` }} /></div><div className="text-[12px] mt-1" style={{ color: "#A1A1AA" }}>Free {fmtBytes(hw.mem.free)} for model + KV cache</div></div>
         <div className="vex-panel p-4"><div className="font-semibold mb-2">Disk</div><div className="text-[13px]">{hw.disk.total ? `${fmtBytes(hw.disk.total - hw.disk.free)} / ${fmtBytes(hw.disk.total)} (${diskPct}%)` : "n/a on this host"}</div><div className="vex-bar mt-2"><div style={{ width: `${diskPct}%` }} /></div></div>
         <div className="vex-panel p-4"><div className="font-semibold mb-2">GPU backends</div>
@@ -1059,7 +1049,6 @@ function TasksView() {
   const [msg, setMsg] = useState("");
   const [form, setForm] = useState({ title: "", kind: "general", assignedModel: "" });
   const [models, setModels] = useState<any[]>([]);
-  const [auto, setAuto] = useState(true);
   const load = useCallback(async () => { try { const r = await api("/api/tasks"); setTasks(r.tasks || []); } catch (e: any) { setMsg(e.message); } }, []);
   useEffect(() => {
     const initial = setTimeout(() => {
@@ -1067,16 +1056,6 @@ function TasksView() {
     }, 0);
     const t = setInterval(load, 2500); return () => clearInterval(t);
   }, [load]);
-  // auto-advance running tasks step by step
-  useEffect(() => {
-    if (!auto) return;
-    const running = tasks.find((t) => t.status === "running");
-    if (!running) return;
-    const t = setTimeout(async () => {
-      try { await api("/api/tasks", { method: "POST", body: JSON.stringify({ action: "step", id: running.id }) }); load(); } catch {}
-    }, 1200);
-    return () => clearTimeout(t);
-  }, [tasks, auto, load]);
   async function run(action: string, id?: string) {
     try {
       if (action === "create") {
@@ -1089,8 +1068,8 @@ function TasksView() {
   }
   return (
     <div>
-      <div className="flex items-center justify-between mb-1"><h1 className="text-xl font-bold">Task Manager</h1><label className="text-[12px] flex items-center gap-1" style={{ color: "#A1A1AA" }}><input type="checkbox" checked={auto} onChange={(e) => setAuto(e.target.checked)} /> auto-advance</label></div>
-      <p className="text-[13px] mb-3" style={{ color: "#A1A1AA" }}>Persistent multi-step AI jobs. State survives restarts — recovery never blindly repeats completed steps.</p>
+      <div className="flex items-center justify-between mb-1"><h1 className="text-xl font-bold">Task Manager · Manual planner</h1></div>
+      <p className="text-[13px] mb-3" style={{ color: "#A1A1AA" }}>Manual checklist: carry out each step in AI Workspace / Project Manager, then mark it done. No automatic code execution or test verification.</p>
       {msg && <div className="vex-panel p-2.5 mb-3 text-[13px]">{msg}</div>}
       <div className="vex-panel p-3 mb-3">
         <div className="grid gap-2" style={{ gridTemplateColumns: "2fr 1fr 1fr auto" }}>
@@ -1116,10 +1095,7 @@ function TasksView() {
             <pre className="vex-code vex-pre p-2 text-[11px]" style={{ background: "#131318", borderRadius: 6, maxHeight: 160, overflow: "auto" }}>{t.logs || "(no logs)"}{t.error ? `\nERROR: ${t.error}` : ""}</pre>
           </div>
           <div className="flex flex-wrap gap-2 mt-2">
-            {(t.status === "queued" || t.status === "paused") && <button className="vex-btn" onClick={() => run(t.status === "paused" ? "resume" : "start", t.id)}>{t.status === "paused" ? "Resume" : "Start"}</button>}
-            {t.status === "running" && <button className="vex-btn-ghost" onClick={() => run("pause", t.id)}>Pause</button>}
-            {t.status === "running" && <button className="vex-btn-ghost" onClick={() => run("step", t.id)}>Step once</button>}
-            {(t.status === "failed" || t.status === "paused") && <button className="vex-btn-ghost" onClick={() => run("retry", t.id)}>Retry</button>}
+            {t.status !== "completed" && t.status !== "cancelled" && <button className="vex-btn" onClick={() => { if (confirm("Have you manually completed and checked this step?")) run("complete-step", t.id); }}>Mark current step done</button>}
             {t.status !== "completed" && t.status !== "cancelled" && <button className="vex-btn-danger" onClick={() => run("cancel", t.id)}>Cancel</button>}
             <button className="vex-btn-ghost" onClick={() => run("delete", t.id)}>Delete</button>
           </div>
@@ -1140,6 +1116,7 @@ function TerminalView() {
   useEffect(() => { const initial = setTimeout(() => load(), 0); return () => clearTimeout(initial); }, [load]);
   async function execCmd(approve = false) {
     if (!cmd.trim() || busy) return;
+    if (!approve) { if (!confirm(`Run this shell command with your Windows account permissions?\n\n${cmd}`)) return; approve = true; }
     setBusy(true); setMsg("");
     try { await api("/api/terminal", { method: "POST", body: JSON.stringify({ command: cmd, approveDangerous: approve }) }); setCmd(""); load(); }
     catch (e: any) { setMsg(e.message); }
@@ -1194,7 +1171,7 @@ function SettingsView() {
       setMsg("Saving settings and moving local data if the storage folder changed…");
       const result = await api("/api/settings", { method: "POST", body: JSON.stringify({ values: s }) });
       if (result.restartRequired) {
-        setMsg("Storage moved. A-Center will restart now.");
+        setMsg("Storage copied. Restarting. Original files are kept as a backup; delete them only after confirming the new location works.");
         const desktop = (window as Window & { vexDesktop?: DesktopBridge }).vexDesktop;
         setTimeout(() => desktop?.restartApp?.(), 1200);
       } else setMsg("Settings saved.");

@@ -1,3 +1,4 @@
+import { storageBusy } from "@/lib/maintenance";
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { downloads, models } from "@/db/schema";
@@ -39,6 +40,8 @@ async function runDownload(id: string) {
       if (start > 0) headers["Range"] = `bytes=${start}-`;
       const res = await fetch(dl.url, { headers, signal: ctrl.signal });
       if (!res.ok && res.status !== 206) throw new Error(`HTTP ${res.status} ${res.statusText}`);
+      if (start > 0 && res.status === 200) start = 0; // server ignored Range: replace, never append
+      if (res.status === 206 && !res.headers.get("content-range")?.startsWith(`bytes ${start}-`)) throw new Error("Invalid Content-Range; download left untouched.");
       const lenHeader = res.headers.get("content-length");
       const total = lenHeader ? start + Number(lenHeader) : dl.totalBytes || 0;
       await db.update(downloads).set({ totalBytes: total }).where(eq(downloads.id, id));
@@ -71,7 +74,11 @@ async function runDownload(id: string) {
       if (cur.status === "paused") { await db.update(downloads).set({ bytesDownloaded: received }).where(eq(downloads.id, id)); return; }
       // Verify + finalize: move to models dir, register model
       const st = fs.statSync(dest);
-      if (total && st.size < total - 1024) {
+      const header = Buffer.alloc(4);
+      const headerFd = fs.openSync(dest, "r");
+      try { fs.readSync(headerFd, header, 0, 4, 0); } finally { fs.closeSync(headerFd); }
+      if (header.toString() !== "GGUF") throw new Error("Downloaded file is not a GGUF model (invalid header).");
+      if (total && st.size !== total) {
         await db.update(downloads).set({ status: "failed", error: `Incomplete file: got ${formatBytes(st.size)} of ${formatBytes(total)}` }).where(eq(downloads.id, id));
         return;
       }
@@ -83,9 +90,8 @@ async function runDownload(id: string) {
         stream.on("end", () => resolve());
         stream.on("error", reject);
       });
-      const finalPath = path.join(MODELS_DIR, `${dl.modelName.replace(/[^a-zA-Z0-9._-]+/g, "_")}.gguf`);
+      const finalPath = path.join(MODELS_DIR, `${id}-${dl.modelName.replace(/[^a-zA-Z0-9._-]+/g, "_")}.gguf`);
       fs.renameSync(dest, finalPath);
-      await db.update(downloads).set({ status: "completed", progress: 1, bytesDownloaded: st.size, totalBytes: st.size || total }).where(eq(downloads.id, id));
       const fmt = "GGUF";
       await db.insert(models).values({
         name: dl.modelName, repo: dl.repo, version: "latest", format: fmt,
@@ -96,8 +102,13 @@ async function runDownload(id: string) {
         description: `Downloaded from ${dl.repo || dl.url} · sha256:${hash.digest("hex").slice(0, 16)}…`,
         category: "chat", downloadUrl: dl.url,
       });
+      await db.update(downloads).set({ status: "completed", progress: 1, bytesDownloaded: st.size, totalBytes: st.size || total }).where(eq(downloads.id, id));
     } catch (e: unknown) {
-      if ((e as Error)?.name === "AbortError") return;
+      if ((e as Error)?.name === "AbortError") {
+        const state = (await db.select().from(downloads).where(eq(downloads.id, id)))[0];
+        if (state?.status === "cancelled" && state.destPath) fs.rmSync(state.destPath, { force: true });
+        return;
+      }
       const cur = (await db.select().from(downloads).where(eq(downloads.id, id)))[0];
       if (cur && (cur.status === "paused" || cur.status === "cancelled")) return;
       await db.update(downloads).set({ status: "failed", error: e instanceof Error ? e.message.slice(0, 500) : "download failed" }).where(eq(downloads.id, id));
@@ -116,6 +127,7 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
+  if (storageBusy()) return NextResponse.json({ error: "Storage relocation in progress. Restart A-Center before making changes." }, { status: 409 });
   ensureDirs();
   const body = await req.json().catch(() => ({}));
   const b = body as { url?: string; modelName?: string; repo?: string; quantization?: string; action?: string; id?: string };
@@ -130,12 +142,15 @@ export async function POST(req: NextRequest) {
     }
     if (b.action === "resume" || b.action === "retry") {
       await db.update(downloads).set({ status: "queued", error: "" }).where(eq(downloads.id, b.id));
+      await workers.get(b.id);
       void runDownload(b.id);
       return NextResponse.json({ ok: true });
     }
     if (b.action === "cancel") {
       await db.update(downloads).set({ status: "cancelled" }).where(eq(downloads.id, b.id));
       controllers.get(b.id)?.abort();
+      await workers.get(b.id);
+      if (dl.destPath) fs.rmSync(dl.destPath, { force: true });
       return NextResponse.json({ ok: true });
     }
     if (b.action === "delete") {
@@ -151,7 +166,7 @@ export async function POST(req: NextRequest) {
     const cl = head.headers.get("content-length");
     if (cl) total = Number(cl);
   } catch { /* ignore */ }
-  const dest = path.join(DOWNLOADS_DIR, `${b.modelName.replace(/[^a-zA-Z0-9._-]+/g, "_")}.part`);
+  const dest = path.join(DOWNLOADS_DIR, `${crypto.randomUUID()}-${b.modelName.replace(/[^a-zA-Z0-9._-]+/g, "_")}.part`);
   const [row] = await db.insert(downloads).values({
     modelName: b.modelName, repo: b.repo || "", url: b.url, destPath: dest,
     quantization: b.quantization || "Q4_K_M", status: "queued", totalBytes: total || 0,

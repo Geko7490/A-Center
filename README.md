@@ -1,5 +1,11 @@
 # A-Center
 
+Version 0.1.1 fixes Windows storage relocation and noninteractive GGUF chat. Relocation copies data and retains the source as a backup; after confirming the new location, remove only old model/download/runtime files. Keep the original `database` folder: the database remains in Electron's user data directory.
+
+For GGUF chat, place the complete matching Vulkan llama.cpp build (EXE and DLL files) in the runtime folder and select the imported model in AI Workspace. Each request runs one CLI turn with closed input; `last-inference.log` records exit status and runtime diagnostics. Task Manager is a manual checklist, not an automated coding agent. Remaining product work is tracked in [ROADMAP.md](ROADMAP.md).
+
+Run `npm run build` then `npm test` for the isolated API smoke tests. Set `A_CENTER_TEST_MODEL` to a local GGUF and put its matching `llama-cli` on PATH to also check real model generation.
+
 A-Center is a Windows desktop shell around the existing Next.js local workspace. The app server binds to `127.0.0.1`, keeps its database and workspace under the current user's Electron data directory, and is stopped when the desktop app exits.
 
 ## Windows installer

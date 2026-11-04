@@ -2,8 +2,8 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import crypto from "node:crypto";
-import { execSync, exec, execFile } from "node:child_process";
-import { promisify } from "node:util";
+import { execSync, exec } from "node:child_process";
+import { generateLlama } from "./llama";
 
 export const STORAGE_ROOT =
   process.env.VEX_STORAGE || path.join(process.cwd(), ".vex-storage");
@@ -77,6 +77,14 @@ export function safeJoin(base: string, ...parts: string[]): string {
   if (resolved !== baseResolved && !resolved.startsWith(baseResolved + path.sep)) {
     throw new Error("Path traversal blocked: target escapes authorized directory");
   }
+  let ancestor = resolved;
+  while (!fs.existsSync(ancestor) && path.dirname(ancestor) !== ancestor) ancestor = path.dirname(ancestor);
+  if (fs.existsSync(baseResolved) && fs.existsSync(ancestor)) {
+    const realBase = fs.realpathSync(baseResolved);
+    const realTarget = path.resolve(fs.realpathSync(ancestor), path.relative(ancestor, resolved));
+    const rel = path.relative(realBase, realTarget);
+    if (rel === ".." || rel.startsWith(`..${path.sep}`) || path.isAbsolute(rel)) throw new Error("Symbolic link escapes authorized directory");
+  }
   return resolved;
 }
 
@@ -136,7 +144,7 @@ export function getHardwareSnapshot() {
   } catch { cpuUsage = 0; }
   const nvidia = execSafe("nvidia-smi --query-gpu=name,memory.total,memory.used,utilization.gpu --format=csv,noheader 2>&1");
   const rocm = execSafe("rocm-smi --showproductname --showmeminfo vram --showuse 2>&1");
-  const vulkan = execSafe("vulkaninfo --summary 2>&1 | head -n 40");
+  const vulkan = execSafe(process.platform === "win32" ? "vulkaninfo --summary 2>&1 | Select-Object -First 40" : "vulkaninfo --summary 2>&1 | head -n 40");
   let diskTotal = 0, diskFree = 0;
   try {
     if (process.platform !== "win32") {
@@ -145,7 +153,7 @@ export function getHardwareSnapshot() {
       diskTotal = Number(parts[1]) * 1024 || 0;
       diskFree = Number(parts[3]) * 1024 || 0;
     } else {
-      diskTotal = 512 * 1024 ** 3; diskFree = 128 * 1024 ** 3;
+      const stat = fs.statfsSync(STORAGE_ROOT); diskTotal = Number(stat.blocks) * Number(stat.bsize); diskFree = Number(stat.bavail) * Number(stat.bsize);
     }
   } catch { /* ignore */ }
   const gpus: { name: string; backend: string; vramTotal: number; vramUsed: number; util: number }[] = [];
@@ -155,9 +163,13 @@ export function getHardwareSnapshot() {
     const parseMiB = (s: string) => { const m = s.match(/([\d.]+)/); return m ? Number(m[1]) * 1024 * 1024 : 0; };
     gpus.push({ name: name || "NVIDIA GPU", backend: "CUDA", vramTotal: parseMiB(total || ""), vramUsed: parseMiB(used || ""), util: Number(String(util).replace(/\D/g, "")) || 0 });
   }
+  if (process.platform === "win32" && !gpus.length) {
+    const inventory = execSafe("Get-CimInstance Win32_VideoController | Select-Object -ExpandProperty Name");
+    if (inventory.ok) for (const name of inventory.out.trim().split(/\r?\n/).filter(Boolean)) gpus.push({ name, backend: /amd|radeon/i.test(name) ? "Vulkan (verify runtime)" : "unknown", vramTotal: 0, vramUsed: 0, util: 0 });
+  }
   const hasAmdHint = /amd|radeon/i.test(cpuModel + " " + vulkan.out);
   return {
-    cpu: { model: cpuModel, cores, arch: os.arch(), usage: cpuUsage, load1: load[0], load5: load[1], load15: load[2], tempC: null as number | null },
+    cpu: { model: cpuModel, cores, arch: os.arch(), usage: process.platform === "win32" ? null : cpuUsage, load1: load[0], load5: load[1], load15: load[2], tempC: null as number | null },
     mem: { total: totalMem, free: freeMem, used: totalMem - freeMem },
     disk: { total: diskTotal, free: diskFree, used: diskTotal - diskFree },
     gpus,
@@ -200,6 +212,7 @@ export async function ollamaGenerate(model: string, prompt: string, system?: str
   const started = Date.now();
   const res = await fetch("http://127.0.0.1:11434/api/generate", {
     method: "POST",
+    signal: AbortSignal.timeout(300000),
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ model, prompt, system: system || "", stream: false, options: { temperature: opts?.temperature ?? 0.7, num_ctx: opts?.num_ctx ?? 4096 } }),
   });
@@ -211,38 +224,8 @@ export async function ollamaGenerate(model: string, prompt: string, system?: str
   return { text: j.response || "", ms, tps };
 }
 
-const execFileAsync = promisify(execFile);
-
-export async function llamaCppGenerate(modelPath: string, prompt: string, system: string, opts?: { temperature?: number; contextTokens?: number; cpuThreads?: number; gpuLayers?: number | string }): Promise<{ text: string; ms: number; tps: number }> {
-  if (!fs.existsSync(modelPath)) throw new Error(`GGUF model file not found: ${modelPath}`);
-  const runtimeDir = path.join(RUNTIMES_DIR, "llama.cpp");
-  const candidates = process.platform === "win32"
-    ? [path.join(runtimeDir, "llama-cli.exe"), "llama-cli.exe"]
-    : [path.join(runtimeDir, "llama-cli"), "llama-cli"];
-  const errors: string[] = [];
-  const started = Date.now();
-  const contextTokens = Math.max(1024, Math.min(8192, Math.floor(opts?.contextTokens || 4096)));
-  const cpuThreads = Math.max(1, Math.min(os.cpus().length, Math.floor(opts?.cpuThreads || os.cpus().length / 2 || 4)));
-  const requestedLayers = opts?.gpuLayers ?? "auto";
-  const gpuLayers = typeof requestedLayers === "number" ? String(Math.max(0, Math.min(200, Math.floor(requestedLayers)))) : ["auto", "all"].includes(requestedLayers) ? requestedLayers : "auto";
-  const args = ["-m", modelPath, "-p", `${system ? `${system}\n\n` : ""}${prompt}`, "-n", "512", "-c", String(contextTokens), "-t", String(cpuThreads), "-ngl", gpuLayers, "--fit", "on", "--no-display-prompt", "--temp", String(opts?.temperature ?? 0.7)];
-  for (const executable of candidates) {
-    if (path.isAbsolute(executable) && !fs.existsSync(executable)) continue;
-    try {
-      const result = await execFileAsync(executable, args, { timeout: 10 * 60 * 1000, maxBuffer: 8 * 1024 * 1024, windowsHide: true });
-      const text = result.stdout.trim();
-      if (!text) throw new Error(result.stderr.trim().slice(-1000) || "llama.cpp returned no text");
-      const ms = Date.now() - started;
-      const tokens = Math.ceil(text.length / 4);
-      return { text, ms, tps: Math.round((tokens / Math.max(1, ms)) * 1000) };
-    } catch (error) {
-      const e = error as Error & { stderr?: string };
-      errors.push(`${executable}: ${(e.stderr || e.message || "failed").slice(-500)}`);
-      if ((e as NodeJS.ErrnoException).code === "ENOENT") continue;
-      throw new Error(`llama.cpp failed: ${errors.at(-1)}. Use a Vulkan-enabled Windows build for the RX 6700M; CPU fallback uses ${cpuThreads} threads.`);
-    }
-  }
-  throw new Error(`llama-cli was not found in ${runtimeDir} or PATH. Install a Vulkan-enabled llama.cpp build first.`);
+export async function llamaCppGenerate(modelPath: string, prompt: string, system: string, opts?: { temperature?: number; contextTokens?: number; cpuThreads?: number; gpuLayers?: number | string }) {
+  return generateLlama(path.join(RUNTIMES_DIR, "llama.cpp"), modelPath, prompt, system, opts || {});
 }
 
 export function localFallbackReply(prompt: string, mode: string, systemPrompt?: string): { text: string; tps: number } {
