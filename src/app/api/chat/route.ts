@@ -59,10 +59,12 @@ export async function POST(req: NextRequest) {
   let choice = b.modelId || conv.modelId;
   if (!choice) choice = conv.mode === "code" ? conv.codingModel : conv.mode === "agent" ? conv.planningModel : conv.utilityModel || conv.codingModel || conv.planningModel;
   if (choice?.startsWith("evren::") || choice?.startsWith("nvidia::")) return cloudChat(req,conv,b,choice);
-  if (!b.prompt) return NextResponse.json({ error: "Message required for local inference" }, { status: 400 });
+  if (!b.prompt && !b.continue) return NextResponse.json({ error: "Message required for local inference" }, { status: 400 });
   const availableLocal=await db.select().from(models);
   const gguf=availableLocal.find(m=>m.id===choice||m.name===choice)||(!choice?availableLocal.find(m=>m.status==='running')||availableLocal.find(m=>m.format==='GGUF'):undefined);
-  if(gguf?.format==='GGUF'&&gguf.activeRuntime!=='ollama'&&!gguf.installPath.startsWith('ollama:'))return localChat(req,conv,b,gguf);
+  if(gguf&&(gguf.format==='GGUF'||gguf.format==='Ollama'||gguf.activeRuntime==='ollama'||gguf.installPath.startsWith('ollama:'))&&(conv.mode==='agent'||(gguf.format==='GGUF'&&gguf.activeRuntime!=='ollama'&&!gguf.installPath.startsWith('ollama:'))))return localChat(req,conv,b,gguf);
+  if(b.continue||conv.mode==='agent')return NextResponse.json({error:'Select an installed GGUF or Ollama model for the local file agent'},{status:400});
+  if(!b.prompt)return NextResponse.json({error:'Message required'},{status:400});
   let fullPrompt = b.attachment ? `${b.prompt}\n\n[attached file context]\n${String(b.attachment).slice(0, 6000)}` : b.prompt;
   const history = await db.select().from(messages).where(eq(messages.conversationId, b.conversationId)).orderBy(messages.createdAt);
   const contextBudget = Math.max(1024, Math.min(8192, conv.contextTokens || 4096)) * 2;

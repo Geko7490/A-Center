@@ -1,7 +1,7 @@
 import { storageBusy } from "@/lib/maintenance";
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
-import { projects, fileHistory } from "@/db/schema";
+import { projects, fileHistory,gitRepos } from "@/db/schema";
 import { desc, eq } from "drizzle-orm";
 import fs from "node:fs";
 import path from "node:path";
@@ -46,7 +46,20 @@ export async function POST(req: NextRequest) {
   if (storageBusy()) return NextResponse.json({ error: "Storage relocation in progress. Restart A-Center before making changes." }, { status: 409 });
   ensureDirs();
   const body = await req.json().catch(() => ({}));
-  const b = body as { action?: string; id?: string; name?: string; path?: string; permissionMode?: string; protectedFiles?: string[]; excludedDirs?: string[]; fileSizeLimitKb?: number; terminalAllowed?: boolean };
+  const b = body as { repoId?:string; localDir?:string; action?: string; id?: string; name?: string; path?: string; permissionMode?: string; protectedFiles?: string[]; excludedDirs?: string[]; fileSizeLimitKb?: number; terminalAllowed?: boolean };
+  if(b.action==='connect-local'){
+    try{
+      const repo=b.repoId?(await db.select().from(gitRepos).where(eq(gitRepos.id,b.repoId)))[0]:undefined;
+      if(b.repoId&&!repo)throw Error('Repository not found');
+      const dir=repo?.localPath||b.localDir;if(!dir||!path.isAbsolute(dir)||!fs.existsSync(dir)||!fs.statSync(dir).isDirectory())throw Error('Choose an existing absolute Local Dir folder');
+      const target=fs.realpathSync(dir);if(target===path.parse(target).root)throw Error('Choose a dedicated project folder');
+      const readOnly=repo?.permission==='read-only'||b.permissionMode==='read-only';
+      const existing=(await db.select().from(projects)).find(p=>fs.existsSync(p.path)&&fs.realpathSync(p.path).toLowerCase()===target.toLowerCase());
+      if(existing){if(readOnly&&existing.permissionMode!=='read-only')await db.update(projects).set({permissionMode:'read-only'}).where(eq(projects.id,existing.id));return NextResponse.json({project:{...existing,...(readOnly?{permissionMode:'read-only'}:{})}});}
+      const [project]=await db.insert(projects).values({name:b.name||path.basename(target),path:target,permissionMode:readOnly?'read-only':'approval',protectedFiles:['.env','.env.*','*.pem','credentials.json'],excludedDirs:['node_modules','.git','dist','build','.next'],terminalAllowed:false,fileSizeLimitKb:1024}).returning();
+      return NextResponse.json({project});
+    }catch(e){return NextResponse.json({error:e instanceof Error?e.message:'Local Dir registration failed'},{status:400});}
+  }
   if (b.action === "delete" && b.id) {
     await db.delete(projects).where(eq(projects.id, b.id));
     return NextResponse.json({ ok: true });

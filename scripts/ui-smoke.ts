@@ -22,6 +22,15 @@ async function main(){
   await page.getByRole("button",{name:/Model Center$/}).click();await page.getByRole("combobox").selectOption("nvidia");await page.getByRole("button",{name:"Workspace’te kullan",exact:true}).first().click();await page.getByText("Remember me",{exact:true}).waitFor();
   const selector=page.locator("label").filter({hasText:"Primary model"}).locator("select");assert((await selector.inputValue()).startsWith("nvidia::"));await selector.selectOption("ui-local");assert(await page.getByText("Remember me",{exact:true}).isVisible());
   await page.getByRole("button",{name:/Task Manager$/}).click();await page.getByPlaceholder("Task: Build a complete Roblox weapon system…").fill("UI agent plan");await page.getByRole("button",{name:"Create task",exact:true}).click();await page.getByRole("button",{name:"Open with Agent Engine",exact:true}).click();await page.waitForFunction(()=>Array.from(document.querySelectorAll("input")).some(i=>i.value==="UI agent plan"));assert.equal(await page.locator("label").filter({hasText:"General chat"}).locator("select").inputValue(),"agent");
+  const localDir=path.join(temp,'local-dir-ui');fs.mkdirSync(localDir);let approved=false;
+  // Proposal rendering/decision is a UI fixture; real file writes are tested by test:files.
+  await page.route('**/api/ai/tools?*',async route=>{await route.fulfill({json:{calls:[{id:'ui-file',messageId:'ui-message',name:'write_file',args:{file:'hello.luau',content:'print("hello")'},state:approved?'completed':'proposed',preview:approved?undefined:{file:'hello.luau',exists:false,before:'',after:'print("hello")',diff:'+ print("hello")'}}]}});});
+  await page.route('**/api/ai/tools',async route=>{const body=route.request().postDataJSON();assert.equal(body.id,'ui-file');assert.equal(body.decision,'approve');approved=true;await route.fulfill({json:{state:'completed',output:'{"written":"hello.luau"}'}});});
+  await page.getByRole('button',{name:/GitHub Manager$/}).click();await page.getByPlaceholder('local dir (optional)').fill(localDir);await page.getByRole('button',{name:'Local Dir ile yerel AI',exact:true}).click();
+  await page.getByRole('heading',{name:'AI Workspace',exact:true}).waitFor();await page.waitForFunction(()=>Array.from(document.querySelectorAll('select')).some(s=>s.value==='ui-local'));
+  assert.equal(await selector.inputValue(),'ui-local');await page.getByText(localDir,{exact:true}).waitFor();await page.getByLabel('Dosya değişiklik önizlemesi').waitFor();assert(await page.getByText('Yeni dosya oluşturulacak',{exact:false}).isVisible());
+  page.once('dialog',dialog=>dialog.accept());await page.getByRole('button',{name:'İşlemi onayla ve çalıştır',exact:true}).click();await page.getByText('write_file · completed',{exact:true}).waitFor();assert(approved);
+  await page.unroute('**/api/ai/tools?*');await page.unroute('**/api/ai/tools');
   // UI-only cloud fixture: provider enable/selection and first-chat creation use real app routes.
   // Generation and credentials are mocked here; actual EVREN transport is covered separately.
   const existing=await(await page.request.get(`http://127.0.0.1:${port}/api/chat`)).json();for(const c of existing.conversations)await page.request.post(`http://127.0.0.1:${port}/api/chat`,{data:{action:"delete",conversationId:c.id}});
@@ -40,7 +49,7 @@ async function main(){
   await page.getByRole('button',{name:/Runtime Manager$/}).click();const gpu=page.locator('label').filter({hasText:'GPU / backend'}).locator('select');await gpu.selectOption('Vulkan1');assert.equal(await gpu.inputValue(),'Vulkan1');
   await page.getByRole('button',{name:/Apply hybrid profile/}).click();await page.waitForFunction(()=>Array.from(document.querySelectorAll('select')).some(s=>s.value==='Vulkan0'));assert.equal(savedConfig.device,'Vulkan0');assert.equal(savedConfig.fitTargetMiB,1024);assert.equal(savedConfig.gpuLayers,'auto');
   await page.getByRole('button',{name:'Modeli bellekten çıkar',exact:true}).click();await page.getByText(/Sunucu: Kapalı/).waitFor();
-  assert.equal(errors.length,0,errors.join("\n"));console.log("PASS provider/local history, first-chat selection, GPU selection/preset and persistent model stop (isolated UI fixtures; mocked cloud generation/runtime status)");
+  assert.equal(errors.length,0,errors.join("\n"));console.log("PASS provider/local history, first-chat selection, Local Dir handoff/file preview/approval, GPU selection/preset and persistent model stop (isolated UI fixtures; mocked generation/proposals/runtime status)");
  }finally{await browser?.close();if(child){child.kill();await new Promise<void>(r=>child!.exitCode!==null?r():child!.once("close",()=>r()));}assert(path.resolve(temp).startsWith(path.resolve(os.tmpdir())+path.sep));fs.rmSync(temp,{recursive:true,force:true});}
 }
 main().catch(e=>{console.error(e);process.exitCode=1;});

@@ -1,5 +1,7 @@
 # A-Center
 
+Version 0.5.0 adds local model file creation/editing through the existing Local Dir field. Open a folder with **Local Dir ile yerel AI**, choose a GGUF/Ollama model in Agent mode, and review/approve its file proposals. Existing files are read before editing; changes have previews, backups and conflict checks. See [Local Dir file agent setup](docs/LOCAL_FILES.md).
+
 Version 0.4.0 adds a Roblox Studio docked request panel and real, approval-gated Roblox task execution. See [Studio panel setup, update steps and test limits](docs/ROBLOX_BRIDGE.md). Replace the old VexBridge copy once; plugin 1.4.0 is required for task edits.
 
 Version 0.2.0 adds optional EVREN and NVIDIA Build providers with OS-encrypted API keys, real SSE/reasoning output, a unified Model Center and approval-based agent tools. See [Cloud provider setup and validation](docs/CLOUD_PROVIDERS.md). API keys are entered in API Providers after installing this version; they are not bundled with the application.

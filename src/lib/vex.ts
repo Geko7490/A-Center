@@ -214,13 +214,13 @@ export async function checkOllama(force=false): Promise<OllamaStatus> {
  },force);
 }
 
-export async function ollamaGenerate(model: string, prompt: string, system?: string, opts?: { temperature?: number; num_ctx?: number; signal?:AbortSignal }) {
+export async function ollamaGenerate(model: string, prompt: string, system?: string, opts?: { temperature?: number; num_ctx?: number; num_predict?:number; signal?:AbortSignal }) {
   const started = Date.now();
   const res = await fetch("http://127.0.0.1:11434/api/generate", {
     method: "POST",
     signal: AbortSignal.any([AbortSignal.timeout(300000),opts?.signal||new AbortController().signal]),
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ model, prompt, system: system || "", stream: false, options: { temperature: opts?.temperature ?? 0.7, num_ctx: opts?.num_ctx ?? 4096 } }),
+    body: JSON.stringify({ model, prompt, system: system || "", stream: false, options: { temperature: opts?.temperature ?? 0.7, num_ctx: opts?.num_ctx ?? 4096,...(opts?.num_predict?{num_predict:Math.max(1,Math.min(131072,opts.num_predict))}:{}) } }),
   });
   if (!res.ok) throw new Error(`Ollama error HTTP ${res.status}: ${await res.text().then((t) => t.slice(0, 500))}`);
   const j = (await res.json()) as { response?: string; eval_count?: number; eval_duration?: number;prompt_eval_count?:number;prompt_eval_duration?:number;load_duration?:number };

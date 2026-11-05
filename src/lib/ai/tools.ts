@@ -27,16 +27,34 @@ export function validateCall(call:ToolCall) {
   for(const [k,v] of Object.entries(args))if(typeof v!=="string" || (props[k].enum&&!props[k].enum.includes(v)))throw new ProviderError("Invalid tool argument value","invalid_tool_call",400);
   return args;
 }
-function protectedFile(patterns:string[],file:string) {
+export function protectedFile(patterns:string[],file:string) {
   const normalized=file.replace(/\\/g,"/");
   return patterns.some(p=>{const regex=new RegExp("^"+p.split("*").map(s=>s.replace(/[.*+?^${}()|[\]\\]/g,"\\$&")).join(".*")+"$","i");return regex.test(normalized)||regex.test(path.basename(normalized));});
+}
+export async function assertFileWritePermission(p:typeof projects.$inferSelect){
+  if(p.permissionMode==='read-only')throw new ProviderError('Read-only project: file writes are blocked','read_only',403);
+  const target=fs.realpathSync(p.path).toLowerCase();
+  const repos=await db.select().from(gitRepos);
+  if(repos.some(r=>r.permission==='read-only'&&fs.existsSync(r.localPath)&&fs.realpathSync(r.localPath).toLowerCase()===target))throw new ProviderError('Read-only repository: file writes are blocked','read_only',403);
+}
+export function authorizedFile(p:typeof projects.$inferSelect,file:string){
+  const rel=file.replace(/\\/g,'/');const parts=rel.split('/');
+  if(!rel||rel.startsWith('/')||rel.includes(':')||/[\x00-\x1f]/.test(rel)||parts.some(s=>!s||s==='.'||s==='..'||/[. ]$/.test(s)||/^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i.test(s)))throw new ProviderError('Use a relative project file path without traversal or special device names','invalid_path',400);
+  const full=safeJoin(p.path,rel);let ancestor=full;
+  while(!fs.existsSync(ancestor))ancestor=path.dirname(ancestor);
+  const real=path.relative(fs.realpathSync(p.path),path.resolve(fs.realpathSync(ancestor),path.relative(ancestor,full))).replace(/\\/g,'/');
+  for(const candidate of [rel,real]){
+    if(protectedFile(p.protectedFiles,candidate))throw new ProviderError('Protected file access is blocked','protected_file',403);
+    if(candidate.split('/').some(s=>p.excludedDirs.some(d=>d.toLowerCase()===s.toLowerCase())))throw new ProviderError('Excluded directory access is blocked','protected_file',403);
+  }
+  return full;
 }
 export async function executeTool(name:string,args:Record<string,unknown>,projectId:string,signal?:AbortSignal) {
   const p=(await db.select().from(projects).where(eq(projects.id,projectId)))[0];if(!p)throw new ProviderError("Select an authorized project in the session","project_required",400);
   if(name==="read_file"||name==="write_file") {
-    const file=String(args.file);const full=safeJoin(p.path,file);
-    if(protectedFile(p.protectedFiles,file))throw new ProviderError("Protected file access is blocked","protected_file",403);
+    const file=String(args.file);const full=authorizedFile(p,file);
     if(name==="read_file"){const stat=fs.statSync(full);if(!stat.isFile()||stat.size>Math.min(p.fileSizeLimitKb*1024,128000))throw new ProviderError("File exceeds tool size limit","file_limit",400);return{content:fs.readFileSync(full,"utf8")};}
+    await assertFileWritePermission(p);
     const {POST}=await import("@/app/api/projects/files/route");
     const invoke=(body:object)=>POST(new NextRequest("http://127.0.0.1/api/projects/files",{method:"POST",body:JSON.stringify(body)}));
     const response=await invoke({projectId:p.id,file,content:args.content,action:"write",reason:"User approved AI tool proposal"});const result=await response.json();if(!response.ok)throw new ProviderError(result.error,"file_permission",response.status);

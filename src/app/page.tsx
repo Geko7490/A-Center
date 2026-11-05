@@ -129,7 +129,7 @@ export default function VexApp() {
         {nav === "runtimes" && <RuntimesView />}
         {nav === "workspace" && <WorkspaceView />}
         {nav === "projects" && <ProjectsView />}
-        {nav === "github" && <GithubView />}
+        {nav === "github" && <GithubView go={setNav} />}
         {nav === "roblox" && <RobloxView />}
         {nav === "plugins" && <PluginsView />}
         {nav === "hardware" && <HardwareView />}
@@ -151,6 +151,7 @@ function TutorialView({ go }: { go: (n: NavKey) => void }) {
     { title: "4 · Hibrit çalışma ne yapar?", text: "llama.cpp --n-gpu-layers auto ve --fit on ile GPU belleğine sığan katmanları RX 6700M'e, kalanını 32 GB sistem belleği ve Ryzen 7 5800H işlemciye bırakır. Modelin tamamı VRAM'e sığmak zorunda değildir; CPU/RAM desteği hızın düşmesine yol açabilir. GPU layers alanında auto önerilir. Bağlamı 4K'dan başlat; bellek veya hız sorunu olursa 2K'ya indir." },
     { title: "5 · Roblox Studio bağlantısı", text: "Roblox Integration → Download Plugin; VexBridge.lua dosyasını Studio → Plugins → Plugins Folder içine koyup eski VexBridge kopyasını değiştir. Studio'yu yeniden başlat, localhost HTTP iznini ver. A-Center'da Connect to Studio, Studio araç çubuğunda VexBridge'e bas. Yeşil durum gerçek Studio yanıtını gösterir; Self-test bağlantı kurmaz." },
     { title: "6 · EVREN / NVIDIA ve ajan araçları", text: "API Providers → anahtarını kaydet, EVREN şartlarını okuyup onayla, sağlayıcıyı etkinleştir ve modelleri yenile. Model Center'dan model seç. AI Workspace'te Agent modu ve proje seçilirse doğrulanmış tool calling modelleri araç önerileri üretebilir. Öneriyi inceleyip onayla veya reddet; gerçek sonuçlarla ajanı devam ettir. Terminal için projenin terminal iznini ayrıca açmalısın. Bulut mesajları, ekler ve onaylı araç sonuçları sağlayıcıya gönderilir." },
+    { title: "7 · Yerel AI ile klasöründeki dosyaları düzenle", text: "GitHub Manager → Local Dir alanına mevcut klasörün tam yolunu yaz → Local Dir ile yerel AI. Bağlı bir deponun Yerel AI ile dosyaları düzenle düğmesini de kullanabilirsin. AI Workspace Agent modunda yerel GGUF veya Ollama modelini seçip dosya isteğini yaz. Öneriler bölümünde okuma işlemini onayla; gerçek sonuçlarla devam ettir. Yazma önerisinin önce/sonra içeriğini inceleyip onayla. Dosya ancak bu onayla kaydedilir; önceki içerik Project Manager geçmişinde yedeklenir. Read only klasörler değiştirilemez. Dosya öneriden sonra değiştiyse eski öneriyi reddedip yeniden okut." },
     { title: "Sorun giderme", text: "D: taşıma cross-origin hatası verirse A-Center'ı güncel kurulum paketiyle yeniden kurup tekrar dene. Taşıma etkin indirme/runtime varken başlamaz. Hugging Face araması için internet gerekir. GGUF sohbeti için Vulkan destekli llama-server.exe şarttır; yoksa Runtime Manager'daki gösterilen klasöre ekle. İndirme tamamlandı ama model çalışmıyorsa llama-cli sürümünü ve modelin My Models'daki dosya yolunu kontrol et." },
   ];
   return <div>
@@ -596,6 +597,14 @@ function WorkspaceView() {
       if (r.conversations?.[0]) { setCid(r.conversations[0].id); await loadConvs(r.conversations[0].id); const c = r.conversations[0]; setMode(c.mode); setSys(c.systemPrompt || ""); setTemp(c.temperature); setCtx(c.contextTokens); setModelId(c.modelId || ""); setPlanning(c.planningModel || ""); setCoding(c.codingModel || ""); setUtility(c.utilityModel || ""); setProjectId(c.providerData?.projectId||""); setThinking(c.providerData?.thinking); setEffort(c.providerData?.effort||""); setMaxTokens(c.providerData?.maxTokens||2048); }
       else {const created=await api("/api/chat",{method:"POST",body:JSON.stringify({action:"create"})});setCid(created.conversation.id);await loadConvs(created.conversation.id);}
       const preferred=sessionStorage.getItem("acenter-selected-model"); if(preferred){setModelId(preferred);sessionStorage.removeItem("acenter-selected-model");}
+      const localProject=sessionStorage.getItem('acenter-local-project');
+      if(localProject){
+        sessionStorage.removeItem('acenter-local-project');
+        const catalog=await api('/api/ai/models');
+        const local=catalog.models?.find((m:any)=>m.provider==='local'&&(m.format==='GGUF'||m.format==='Ollama'||m.activeRuntime==='ollama'));
+        const result=await api('/api/chat',{method:'POST',body:JSON.stringify({action:'create',mode:'agent',title:'Local Dir · dosya ajanı',modelId:local?.key||'',providerData:{projectId:localProject}})});
+        setCid(result.conversation.id);setMode('agent');setProjectId(localProject);setModelId(local?.key||'');setMsgs([]);setCalls([]);await loadConvs(result.conversation.id);
+      }
       const taskText=sessionStorage.getItem("acenter-agent-task");
       if(taskText){sessionStorage.removeItem("acenter-agent-task");const task=JSON.parse(taskText);void api("/api/chat",{method:"POST",body:JSON.stringify({action:"create",mode:"agent",title:task.title,modelId:task.model||"",providerData:{taskId:task.id,projectId:task.projectId||""}})}).then(result=>{setCid(result.conversation.id);setMode("agent");setModelId(task.model||"");setProjectId(task.projectId||"");setPrompt(task.title);setMsgs([]);void loadConvs(result.conversation.id);});}
     });
@@ -721,11 +730,11 @@ function WorkspaceView() {
             {selected?.capabilities?.vision&&<input className="vex-input" placeholder="Görsel HTTPS URL (isteğe bağlı)" value={image} onChange={e=>setImage(e.target.value)}/>}
             <p className="text-[11px] text-zinc-400">Tools: {selected?.capabilities?.tools===true?"destekleniyor":"doğrulanmadı; araç gönderilmez"}. Reasoning metni yalnız API sağlarsa gösterilir.</p>
           </>}
-          {mode==="agent"&&<label className="block text-[12px]">Araçların erişeceği proje<select className="vex-input" value={projectId} onChange={e=>setProjectId(e.target.value)}><option value="">Proje seç (araçlar kapalı)</option>{projects.map(p=><option key={p.id} value={p.id}>{p.name} · {p.permissionMode}</option>)}</select></label>}
+          {mode==="agent"&&<label className="block text-[12px]">Araçların erişeceği proje<select className="vex-input" value={projectId} onChange={e=>setProjectId(e.target.value)}><option value="">Proje seç (araçlar kapalı)</option>{projects.map(p=><option key={p.id} value={p.id}>{p.name} · {p.permissionMode}</option>)}</select><span className="block break-all mt-1">{projects.find(p=>p.id===projectId)?.path}</span>{!cloud&&<span className="block mt-1">Yerel dosya ajanı: dosya listeler, okur, oluşturur ve düzenler. Her işlem onayını bekler. Düzenleme öncesinde mevcut dosyayı okumasına izin ver; sonra gerçek araç sonuçlarıyla devam ettir.</span>}</label>}
           <button className="vex-btn-ghost w-full" onClick={saveSettings}>Save session</button>
         </div>
       </div>
-      {calls.length>0&&<section className="vex-panel p-3 mt-3"><h2 className="font-semibold mb-2">Ajan araç önerileri ve gerçek sonuçlar</h2>{calls.slice(-20).map(call=><details key={call.id} open={call.state==="proposed"} className="mb-3"><summary className="text-[13px]">{call.name} · {call.state}</summary><pre className="vex-pre text-[12px] max-h-64 overflow-auto">{JSON.stringify(call.args,null,2)}</pre>{call.output&&<pre className="vex-pre text-[12px] max-h-64 overflow-auto">{call.output}</pre>}{call.state==="proposed"&&<div className="flex gap-2"><button className="vex-btn" disabled={sending} onClick={()=>decide(call,"approve")}>İşlemi onayla ve çalıştır</button><button className="vex-btn-danger" disabled={sending} onClick={()=>decide(call,"reject")}>Reddet</button></div>}</details>)}{canContinue&&<button className="vex-btn" disabled={sending} onClick={()=>send(true)}>Gerçek araç sonuçlarıyla ajanı devam ettir</button>}</section>}
+      {calls.length>0&&<section className="vex-panel p-3 mt-3"><h2 className="font-semibold mb-2">Ajan araç önerileri ve gerçek sonuçlar</h2>{calls.slice(-20).map(call=><details key={call.id} open={call.state==="proposed"} className="mb-3"><summary className="text-[13px]">{call.name} · {call.state}</summary><p className="text-[11px] break-all">Hedef proje: {projects.find(p=>p.id===call.projectId)?.path||call.projectId||"—"}</p><pre className="vex-pre text-[12px] max-h-64 overflow-auto">{JSON.stringify(call.args,null,2)}</pre>{call.preview&&<><p className="text-[12px]">{call.preview.exists?'Dosya düzenlenecek':'Yeni dosya oluşturulacak'} · {call.preview.file}</p><pre aria-label="Dosya değişiklik önizlemesi" className="vex-pre text-[12px] max-h-64 overflow-auto">{call.preview.diff}</pre><details><summary>Tam dosya: önce / sonra</summary><pre className="vex-pre max-h-64 overflow-auto">{call.preview.before}</pre><pre className="vex-pre max-h-64 overflow-auto">{call.preview.after}</pre></details></>}{call.previewError&&<p className="text-red-400 text-[12px]">{call.previewError}</p>}{call.output&&<pre className="vex-pre text-[12px] max-h-64 overflow-auto">{call.output}</pre>}{call.state==="proposed"&&<div className="flex gap-2"><button className="vex-btn" disabled={sending||!!call.previewError} onClick={()=>decide(call,"approve")}>İşlemi onayla ve çalıştır</button><button className="vex-btn-danger" disabled={sending} onClick={()=>decide(call,"reject")}>Reddet</button></div>}</details>)}{canContinue&&<button className="vex-btn" disabled={sending} onClick={()=>send(true)}>Gerçek araç sonuçlarıyla ajanı devam ettir</button>}</section>}
     </div>
   );
 }
@@ -891,7 +900,7 @@ function ProjectsView() {
 }
 
 /* ================= GITHUB ================= */
-function GithubView() {
+function GithubView({go}:{go:(key:NavKey)=>void}) {
   const [repos, setRepos] = useState<any[]>([]);
   const [msg, setMsg] = useState("");
   const [form, setForm] = useState({ url: "", branch: "main", localDir: "", permission: "read-write" });
@@ -905,6 +914,11 @@ function GithubView() {
     setMsg(""); setOut("");
     try { const r = await api("/api/git", { method: "POST", body: JSON.stringify(body) }); setOut(r.out || r.output || JSON.stringify(r).slice(0, 2000)); load(); }
     catch (e: any) { setMsg(e.message); }
+  }
+  async function openLocalAI(repoId?:string){
+    setMsg('');
+    try{const r=await api('/api/projects',{method:'POST',body:JSON.stringify({action:'connect-local',repoId,localDir:form.localDir,...(!repoId?{permissionMode:form.permission==='read-only'?'read-only':'approval'}:{})})});sessionStorage.setItem('acenter-local-project',r.project.id);go('workspace');}
+    catch(e:any){setMsg(e.message);}
   }
   return (
     <div>
@@ -920,9 +934,10 @@ function GithubView() {
         </div>
         <div className="flex gap-2 mt-2">
           <button className="vex-btn" onClick={() => run({ action: "clone", ...form })}>Clone repository</button>
-          <button className="vex-btn-ghost" onClick={() => run({ action: "connect", url: form.url, localDir: form.localDir, branch: form.branch })}>Connect existing local repo</button>
+          <button className="vex-btn-ghost" onClick={() => run({ action: "connect", ...form })}>Connect existing local repo</button>
+          <button className="vex-btn" disabled={!form.localDir.trim()} onClick={()=>openLocalAI()}>Local Dir ile yerel AI</button>
         </div>
-        <div className="text-[11px] mt-2" style={{ color: "#71717a" }}>Example: Geko7490/VexCenter · branch main · path /src/ · permission Read+Write · push = manual approval (the Push button itself).</div>
+        <div className="text-[11px] mt-2" style={{ color: "#71717a" }}>Local Dir: mevcut klasörün tam yolu (ör. D:\Projeler\Oyunum). Yerel AI bu klasörü doğrudan kullanır. Git deposu veya URL gerekmez; dosya değişiklikleri onayını bekler.</div>
       </div>
       {repos.map((r) => (
         <div key={r.id} className="vex-panel p-3 mb-3">
@@ -936,6 +951,7 @@ function GithubView() {
             <pre className="vex-code vex-pre p-2 text-[11px]" style={{ background: "#131318", borderRadius: 6, maxHeight: 150, overflow: "auto" }}>[log]{`\n`}{r.liveLog || "—"}</pre>
           </div>
           <div className="flex flex-wrap gap-2 mt-2">
+            <button className="vex-btn" onClick={()=>openLocalAI(r.id)}>Yerel AI ile dosyaları düzenle</button>
             <button className="vex-btn-ghost" onClick={() => run({ action: "status", id: r.id })}>Status</button>
             <button className="vex-btn-ghost" onClick={() => run({ action: "diff", id: r.id })}>Diff</button>
             <button className="vex-btn-ghost" onClick={() => run({ action: "fetch", id: r.id })}>Fetch</button>
