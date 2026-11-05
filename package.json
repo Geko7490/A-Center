@@ -1,6 +1,6 @@
 {
   "name": "a-center",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "private": true,
   "main": "desktop/main.cjs",
   "scripts": {
@@ -17,7 +17,8 @@
     "test:credentials": "electron scripts/credentials-smoke.cjs",
     "test:ui": "tsx scripts/ui-smoke.ts",
     "test:local": "tsx --test scripts/llama.test.ts",
-    "bench:local": "tsx scripts/benchmark-local.ts"
+    "bench:local": "tsx scripts/benchmark-local.ts",
+    "test:roblox": "tsx --test scripts/roblox.test.ts"
   },
   "dependencies": {
     "@electric-sql/pglite": "^0.3.14",

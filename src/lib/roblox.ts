@@ -4,7 +4,7 @@ import { and, desc, eq, inArray } from "drizzle-orm";
 import { timingSafeEqual } from "node:crypto";
 import { pairingToken } from "./vex";
 
-export const BRIDGE_VERSION = "1.3.0";
+export const BRIDGE_VERSION = "1.4.0";
 export function matchesBridgeToken(supplied: string, expected: string) {
   const a = Buffer.from(supplied), b = Buffer.from(expected);
   return a.length > 0 && a.length === b.length && timingSafeEqual(a, b);
@@ -19,5 +19,5 @@ export async function currentBridge(create = false) {
   return (await db.insert(robloxBridges).values({token:pairingToken(), status:"waiting-for-studio", pluginVersion:"unknown", bridgeVersion:BRIDGE_VERSION, logs:"[init] Waiting for a real Studio heartbeat"}).returning())[0];
 }
 export async function cancelBridgeCommands(id: string) {
-  await db.update(robloxCommands).set({status:"failed",error:"Bridge disconnected or pairing token changed; command was not replayed. Inspect Studio before retrying.",completedAt:new Date()}).where(and(eq(robloxCommands.bridgeId,id),inArray(robloxCommands.status,["queued","running"])));
+  await db.update(robloxCommands).set({status:"failed",error:"Bridge disconnected or pairing token changed; command was not replayed. Inspect Studio before retrying.",completedAt:new Date()}).where(and(eq(robloxCommands.bridgeId,id),inArray(robloxCommands.status,["proposed","queued","running"])));
 }

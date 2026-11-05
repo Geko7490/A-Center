@@ -3,6 +3,7 @@ const http = require("node:http");
 // A stable Studio endpoint; the private desktop API stays on its random port.
 async function createRobloxBridge(target, port = 7817) {
   const routes = new Map([["GET /roblox/next-command", "/roblox/next-command"], ["POST /roblox/command-result", "/roblox/command-result"]]);
+  routes.set('GET /roblox/panel','/roblox/panel');routes.set('POST /roblox/panel','/roblox/panel');
   const server = http.createServer((req, res) => {
     const url = new URL(req.url, "http://127.0.0.1");
     const route = routes.get(`${req.method} ${url.pathname}`);

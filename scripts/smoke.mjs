@@ -29,8 +29,10 @@ try {
  // Exercise the real Studio HTTP transport while the desktop API remains token protected.
  studioRelay=await createRobloxBridge(`http://127.0.0.1:${port}`,0);
  const bridge=(await api('/api/roblox',null,'GET')).data.bridge;
+ const pluginResponse=await fetch(`http://127.0.0.1:${port}/api/roblox?download=plugin`,{headers:{'x-vex-local-token':'smoke-token'}});assert.equal(pluginResponse.status,200);const pluginSource=await pluginResponse.text();assert(pluginSource.includes('CreateDockWidgetPluginGuiAsync'));assert(pluginSource.includes(bridge.token));assert(!pluginSource.includes('__TOKEN__'));assert(pluginSource.includes('version=1.4.0'));
  const studio=async(route,body,extra={})=>{const r=await fetch(`http://127.0.0.1:${studioRelay.port}/roblox/${route}`,{method:body?'POST':'GET',headers:{'x-vex-token':bridge.token,...extra},...(body?{body:JSON.stringify(body)}:{})});return{status:r.status,data:r.headers.get('content-type')?.includes('json')?await r.json():null};};
  assert.equal((await studio('next-command',null,{'x-vex-token':'wrong'})).status,401);
+ assert.equal((await studio('panel')).status,200);
  assert.equal((await studio('next-command',null,{origin:'https://untrusted.invalid'})).status,403);
  assert.equal((await fetch(`http://127.0.0.1:${studioRelay.port}/api/providers`)).status,403);
  assert.equal((await api('/api/roblox',{action:'simulate-studio',token:bridge.token})).status,200);

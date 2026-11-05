@@ -63,7 +63,8 @@ export async function POST(req: NextRequest) {
     if (!allowed.includes(cmd)) return NextResponse.json({ error: `unknown command ${cmd}` }, { status: 400 });
     const args = (body as { args?: Record<string, unknown> }).args || {};
     if(typeof args!=="object"||Array.isArray(args)||"id" in args||"action" in args||JSON.stringify(args).length>1024*1024)return NextResponse.json({error:"Command args must be an object within 1 MB and cannot override id/action"},{status:400});
-    const [queued] = await db.insert(robloxCommands).values({ bridgeId: b.id, command: cmd, args }).returning();
+    if(!['inspect','read-script'].includes(cmd)&&b.pluginVersion!=='1.4.0')return NextResponse.json({error:'Update to the VexBridge 1.4.0 panel before editing Studio.'},{status:409});
+    const [queued] = await db.insert(robloxCommands).values({ bridgeId: b.id, command: cmd, args,status:['inspect','read-script'].includes(cmd)?'queued':'proposed' }).returning();
     await db.update(robloxBridges).set({ logs: log(`queued command ${queued.id}: ${cmd} ${JSON.stringify(args).slice(0, 300)}`) }).where(eq(robloxBridges.id, b.id));
     return NextResponse.json({ ok: true, queued: true, commandId: queued.id, note: "Command queued for Roblox Studio." });
   }
@@ -72,7 +73,7 @@ export async function POST(req: NextRequest) {
     const directory=path.join(process.env.LOCALAPPDATA,"Roblox","Plugins");
     const files=fs.existsSync(directory)?fs.readdirSync(directory).filter(name=>/^vex.*\.(lua|luau|rbxmx)$/i.test(name)):[];
     const port=Number(process.env.VEX_ROBLOX_PORT||new URL(req.url).port)||7817;
-    const plugins=files.map(name=>{try{const file=path.join(directory,name);if(fs.statSync(file).size>2*1024*1024)return{name,checked:false};const text=fs.readFileSync(file,"utf8");return{name,checked:true,matchingToken:text.includes(b.token),matchingEndpoint:text.includes(`http://127.0.0.1:${port}/roblox`),currentVersion:text.includes("/next-command?version=1.3.0")};}catch{return{name,checked:false};}});
+    const plugins=files.map(name=>{try{const file=path.join(directory,name);if(fs.statSync(file).size>2*1024*1024)return{name,checked:false};const text=fs.readFileSync(file,"utf8");return{name,checked:true,matchingToken:text.includes(b.token),matchingEndpoint:text.includes(`http://127.0.0.1:${port}/roblox`),currentVersion:text.includes("/next-command?version=1.4.0")};}catch{return{name,checked:false};}});
     return NextResponse.json({ok:true,result:{directory,plugins,note:"One current VexBridge.lua copy should be enabled. Replace the old VexBridge copy, restart Studio, allow localhost HTTP access and press VexBridge. Other Vex plugins may use a different bridge protocol; do not enable them for this connection."}});
   }
   if (a === "clear-logs") {

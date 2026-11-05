@@ -1,0 +1,14 @@
+import {NextRequest,NextResponse} from 'next/server';
+import {currentBridge,matchesBridgeToken} from '@/lib/roblox';
+import {db} from '@/db';import {tasks,robloxCommands} from '@/db/schema';import {and,eq,desc} from 'drizzle-orm';
+import {startRobloxTask,cancelRobloxTask} from '@/lib/roblox-tasks';
+import {GET as modelList} from '@/app/api/ai/models/route';
+import {storageBusy} from '@/lib/maintenance';
+async function authorize(req:NextRequest){const bridge=await currentBridge();return !req.headers.has('origin')&&bridge&&matchesBridgeToken(req.headers.get('x-vex-token')||'',bridge.token)?bridge:null;}
+export async function GET(req:NextRequest){const bridge=await authorize(req);if(!bridge)return NextResponse.json({error:'Invalid Studio pairing'},{status:401});const list=await db.select().from(tasks).orderBy(desc(tasks.createdAt)).limit(100);return NextResponse.json({models:(await(await modelList()).json()).models,tasks:list.filter(t=>t.kind==='roblox').slice(0,20),proposals:await db.select().from(robloxCommands).where(and(eq(robloxCommands.bridgeId,bridge.id),eq(robloxCommands.status,'proposed'))).limit(20)});}
+export async function POST(req:NextRequest){const bridge=await authorize(req);if(!bridge)return NextResponse.json({error:'Invalid Studio pairing'},{status:401});if(storageBusy())return NextResponse.json({error:'Storage relocation in progress'},{status:409});try{const b=await req.json();
+ if(b.action==='create'){if(typeof b.prompt!=='string'||!b.prompt.trim()||b.prompt.length>8000||typeof b.model!=='string')throw Error('Enter a request and select a model');const [t]=await db.insert(tasks).values({kind:'roblox',title:b.prompt,assignedModel:b.model,status:'queued',steps:[],logs:'Created in Studio panel'}).returning();try{await startRobloxTask(t.id);}catch(e){await db.update(tasks).set({status:'failed',error:String(e)}).where(eq(tasks.id,t.id));throw e;}return NextResponse.json({ok:true,id:t.id});}
+ if(b.action==='cancel'){const task=(await db.select().from(tasks).where(eq(tasks.id,b.id)))[0];if(task?.kind!=='roblox')throw Error('Roblox task required');await cancelRobloxTask(task.id);await db.update(tasks).set({status:'cancelled',updatedAt:new Date()}).where(eq(tasks.id,task.id));return NextResponse.json({ok:true});}
+ if(['approve','reject'].includes(b.action)){if(!/^[0-9a-f-]{36}$/i.test(String(b.id)))throw Error('Invalid proposal');const rows=await db.update(robloxCommands).set(b.action==='approve'?{status:'queued'}:{status:'failed',error:'Rejected in Studio',completedAt:new Date()}).where(and(eq(robloxCommands.id,b.id),eq(robloxCommands.bridgeId,bridge.id),eq(robloxCommands.status,'proposed'))).returning();if(!rows.length)throw Error('Proposal already resolved');return NextResponse.json({ok:true});}
+ throw Error('Unknown panel action');
+ }catch(e){return NextResponse.json({error:e instanceof Error?e.message:'Panel action failed'},{status:400});}}

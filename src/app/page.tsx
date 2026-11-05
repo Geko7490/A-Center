@@ -95,7 +95,7 @@ export default function VexApp() {
             <div style={{ width: 30, height: 30, borderRadius: 6, background: "linear-gradient(135deg,#A855F7,#6D28D9)", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 16 }}>V</div>
             <div>
               <div className="font-bold text-[15px] leading-tight">Vex AI Center</div>
-              <div className="text-[11px]" style={{ color: "#A1A1AA" }}>AI Platform · v0.3.0</div>
+              <div className="text-[11px]" style={{ color: "#A1A1AA" }}>AI Platform · v0.4.0</div>
             </div>
           </div>
           <div className="mt-3 flex items-center gap-2 text-[11px]" style={{ color: "#A1A1AA" }}>
@@ -1150,7 +1150,7 @@ function TasksView({go}:{go:(nav:NavKey)=>void}) {
   return (
     <div>
       <div className="flex items-center justify-between mb-1"><h1 className="text-xl font-bold">Task Manager · Plans + Agent runs</h1></div>
-      <p className="text-[13px] mb-3" style={{ color: "#A1A1AA" }}>Plan checklist steps are marked manually. Open Agent Engine to request real tool proposals; file, terminal and Git operations require separate approval.</p>
+      <p className="text-[13px] mb-3" style={{ color: "#A1A1AA" }}>Roblox görevlerinde model seçip Başlat düğmesine bas. Studio panelinde önerileri onayla; gerçek sonuçlar burada görünür. Diğer görevleri Agent Engine ile açabilirsin.</p>
       {msg && <div className="vex-panel p-2.5 mb-3 text-[13px]">{msg}</div>}
       <div className="vex-panel p-3 mb-3">
         <div className="grid gap-2" style={{ gridTemplateColumns: "2fr 1fr 1fr auto" }}>
@@ -1176,6 +1176,7 @@ function TasksView({go}:{go:(nav:NavKey)=>void}) {
             <pre className="vex-code vex-pre p-2 text-[11px]" style={{ background: "#131318", borderRadius: 6, maxHeight: 160, overflow: "auto" }}>{t.logs || "(no logs)"}{t.error ? `\nERROR: ${t.error}` : ""}</pre>
           </div>
           <div className="flex flex-wrap gap-2 mt-2">
+            {t.kind === 'roblox' && !['running','awaiting_approval','completed','cancelled'].includes(t.status) && <button className="vex-btn" onClick={()=>run('start',t.id)}>Başlat / devam et</button>}
             {t.status !== "completed" && t.status !== "cancelled" && <button className="vex-btn" onClick={() => { if (confirm("Have you manually completed and checked this step?")) run("complete-step", t.id); }}>Mark current step done</button>}
             {t.status !== "completed" && t.status !== "cancelled" && <button className="vex-btn-danger" onClick={() => run("cancel", t.id)}>Cancel</button>}
             <button className="vex-btn" onClick={()=>{sessionStorage.setItem("acenter-agent-task",JSON.stringify({id:t.id,title:t.title,model:t.assignedModel,projectId:t.projectId}));go("workspace");}}>Open with Agent Engine</button>

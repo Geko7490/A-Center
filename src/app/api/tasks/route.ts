@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { tasks } from "@/db/schema";
 import { desc, eq } from "drizzle-orm";
+import {startRobloxTask,cancelRobloxTask,recoverRobloxTasks} from '@/lib/roblox-tasks';
 
 function planSteps(title: string, kind: string): { title: string; status: string; log: string }[] {
   const t = title.toLowerCase();
@@ -24,10 +25,14 @@ export async function POST(req: NextRequest) {
   const b = body as { action?: string; id?: string; title?: string; kind?: string; assignedModel?: string; projectId?: string; steps?: { title: string; status: string; log: string }[] };
   if (!b.action || b.action === "create") {
     if (!b.title) return NextResponse.json({ error: "title required" }, { status: 400 });
+    const kind=b.kind==='roblox'||((!b.kind||b.kind==='general')&&/roblox|npc|luau|studio|weapon/i.test(b.title))?'roblox':b.kind||'general';
+    if(kind==='roblox'&&!b.assignedModel)return NextResponse.json({error:'Select a model for the Roblox task'},{status:400});
     const steps = b.steps?.length ? b.steps : planSteps(b.title, b.kind || "general");
-    const [row] = await db.insert(tasks).values({ title: b.title, kind: b.kind || "general", status: "queued", progress: 0, assignedModel: b.assignedModel || "", projectId: b.projectId || "", steps, currentStep: 0, logs: `[created] ${b.title}\n` }).returning();
+    const [row] = await db.insert(tasks).values({ title: b.title, kind, status: "queued", progress: 0, assignedModel: b.assignedModel || "", projectId: b.projectId || "", steps, currentStep: 0, logs: `[created] ${b.title}\n` }).returning();
+    if(kind==='roblox'){try{await startRobloxTask(row.id);}catch(e){await db.update(tasks).set({status:'failed',error:String(e)}).where(eq(tasks.id,row.id));return NextResponse.json({error:String(e),taskId:row.id},{status:409});}}
     return NextResponse.json({ task: row });
   }
+  if(b.action==='recover'){await recoverRobloxTasks();return NextResponse.json({ok:true,note:'Active workers retain their state. Paused tasks are never replayed automatically.'});}
   if (!b.id) return NextResponse.json({ error: "id required" }, { status: 400 });
   const rows = await db.select().from(tasks).where(eq(tasks.id, b.id));
   const t = rows[0];
@@ -43,15 +48,18 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true });
   }
   if (b.action === "start" || b.action === "resume" || b.action === "step") {
+    if(t.kind==='roblox'){try{return NextResponse.json(await startRobloxTask(t.id));}catch(e){return NextResponse.json({error:String(e)},{status:409});}}
     await db.update(tasks).set({ status: "paused", error: "Planner only: automatic code execution is not available. No files were changed or tests run.", updatedAt: new Date() }).where(eq(tasks.id, b.id));
     return NextResponse.json({ error: "This task is a plan. Execute and verify its steps manually in AI Workspace and Project Manager." }, { status: 409 });
   }
 
   if (b.action === "pause") {
+    await cancelRobloxTask(t.id);
     await db.update(tasks).set({ status: "paused", updatedAt: new Date(), logs: (t.logs || "") + "[paused]\n" }).where(eq(tasks.id, b.id));
     return NextResponse.json({ ok: true });
   }
   if (b.action === "cancel") {
+    await cancelRobloxTask(t.id);
     await db.update(tasks).set({ status: "cancelled", updatedAt: new Date(), logs: (t.logs || "") + "[cancelled]\n" }).where(eq(tasks.id, b.id));
     return NextResponse.json({ ok: true });
   }
@@ -62,6 +70,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true });
   }
   if (b.action === "delete") {
+    await cancelRobloxTask(t.id);
     await db.delete(tasks).where(eq(tasks.id, b.id));
     return NextResponse.json({ ok: true });
   }

@@ -1,10 +1,12 @@
 # A-Center
 
+Version 0.4.0 adds a Roblox Studio docked request panel and real, approval-gated Roblox task execution. See [Studio panel setup, update steps and test limits](docs/ROBLOX_BRIDGE.md). Replace the old VexBridge copy once; plugin 1.4.0 is required for task edits.
+
 Version 0.2.0 adds optional EVREN and NVIDIA Build providers with OS-encrypted API keys, real SSE/reasoning output, a unified Model Center and approval-based agent tools. See [Cloud provider setup and validation](docs/CLOUD_PROVIDERS.md). API keys are entered in API Providers after installing this version; they are not bundled with the application.
 
 Version 0.1.1 fixes Windows storage relocation and noninteractive GGUF chat. Relocation copies data and retains the source as a backup; after confirming the new location, remove only old model/download/runtime files. Keep the original `database` folder: the database remains in Electron's user data directory.
 
-For GGUF chat, place the complete matching Vulkan llama.cpp build (EXE and DLL files) in the runtime folder and select the imported model in AI Workspace. Version 0.3.0 keeps one private llama-server loaded across messages, streams tokens and reports separate real prompt/generation rates, TTFT, cache reuse and actual GPU offload. See [local inference setup and measured benchmarks](docs/LOCAL_INFERENCE.md). Task Manager is a manual checklist, not an automated coding agent. Remaining product work is tracked in [ROADMAP.md](ROADMAP.md).
+For GGUF chat, place the complete matching Vulkan llama.cpp build (EXE and DLL files) in the runtime folder and select the imported model in AI Workspace. Version 0.3.0 keeps one private llama-server loaded across messages, streams tokens and reports separate real prompt/generation rates, TTFT, cache reuse and actual GPU offload. See [local inference setup and measured benchmarks](docs/LOCAL_INFERENCE.md). Task Manager retains manual checklists; Roblox tasks additionally execute approved Studio proposals. Remaining product work is tracked in [ROADMAP.md](ROADMAP.md).
 
 Run `npm run build` then `npm test` for the isolated API smoke tests. Set `A_CENTER_TEST_MODEL` to a local GGUF and put its matching `llama-server` on PATH to also check real model generation.
 

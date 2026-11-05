@@ -3,6 +3,7 @@ import { db } from "@/db";
 import { robloxBridges, robloxCommands } from "@/db/schema";
 import { eq, and } from "drizzle-orm";
 import { currentBridge, matchesBridgeToken } from "@/lib/roblox";
+import {isDeepStrictEqual} from 'node:util';
 
 export const dynamic = "force-dynamic";
 
@@ -17,7 +18,7 @@ export async function POST(request: NextRequest) {
   const found = await db.select().from(robloxCommands)
     .where(and(eq(robloxCommands.id, body.id), eq(robloxCommands.bridgeId, bridge.id)));
   if (!found[0]) return NextResponse.json({ error: "command not found" }, { status: 404 });
-  if(["completed","failed"].includes(found[0].status)&&JSON.stringify(found[0].result)===JSON.stringify(body.result??null))return NextResponse.json({ok:true});
+  if(["completed","failed"].includes(found[0].status)&&isDeepStrictEqual(found[0].result,body.result??null))return NextResponse.json({ok:true});
   if(found[0].status!=="running") return NextResponse.json({error:"Command is not awaiting a result"},{status:409});
 
   const succeeded = body.ok === true && !(body.result && typeof body.result === "object" && "error" in body.result);
