@@ -9,7 +9,7 @@ import {binaryFingerprint,llamaDevices,LlamaDevice,LlamaProbe,probeLlama,selectD
 import {storageBusy} from './maintenance';
 export type LocalMessage={role:'system'|'user'|'assistant';content:string};
 export type LocalMetrics={promptTokens:number|null;generationTokens:number|null;cachedTokens:number|null;promptMs:number|null;generationMs:number|null;promptTokPerSec:number|null;generationTokPerSec:number|null;ttftMs:number|null;requestTtftMs:number|null;loadMs:number;totalMs:number;serverReused:boolean;workerPid:number|null;device:string;offloadedLayers:number|null;totalLayers:number|null};
-export type LlamaOptions={temperature?:number;contextTokens?:number;cpuThreads?:number;gpuLayers?:number|string;device?:string;fitTargetMiB?:number;cacheRamMiB?:number;maxTokens?:number;signal?:AbortSignal;onText?:(text:string)=>void;onReasoning?:(text:string)=>void};
+export type LlamaOptions={temperature?:number;contextTokens?:number;cpuThreads?:number;gpuLayers?:number|string;device?:string;fitTargetMiB?:number;cacheRamMiB?:number;maxTokens?:number;fitOutputBudget?:boolean;signal?:AbortSignal;onText?:(text:string)=>void;onReasoning?:(text:string)=>void};
 type Config={model:string;contextTokens:number;cpuThreads:number;gpuLayers:number|string;device:string;fitTargetMiB:number;cacheRamMiB:number};
 type Worker={child:ChildProcessWithoutNullStreams;closed:Promise<void>;key:string;url:string;signature:string;config:Config;pid:number|null;ready:boolean;exited:boolean;offloadedLayers:number|null;totalLayers:number|null;log:string[];partial:string;logFile:string};
 type Dependencies={probe:typeof probeLlama;devices:(p:LlamaProbe)=>Promise<LlamaDevice[]>;launch:(exe:string,args:string[],key:string)=>ChildProcessWithoutNullStreams};
@@ -83,8 +83,15 @@ export class LlamaServerManager{
   this.busy=true;const started=performance.now(),signal=AbortSignal.any([options.signal||new AbortController().signal,AbortSignal.timeout(600000)]);
   try{
    const {worker:w,reused,loadMs}=await this.ensure(runtimeDir,model,options,signal),requestStart=performance.now();
-   const response=await fetch(w.url+'/v1/chat/completions',{method:'POST',headers:{'content-type':'application/json',authorization:`Bearer ${w.key}`},signal,redirect:'error',body:JSON.stringify({model:'local',messages,stream:true,stream_options:{include_usage:true},cache_prompt:true,id_slot:0,temperature:options.temperature??0.7,max_tokens:Math.floor(Math.max(1,Math.min(131072,options.maxTokens||512)))})});
-   if(!response.ok)throw Error(`llama-server HTTP ${response.status}. Check context/token budget and the model chat template. Log: ${w.logFile}`);
+   let maxTokens=Math.floor(Math.max(1,Math.min(131072,options.maxTokens||512)));
+   if(options.fitOutputBudget){
+    const headers={'content-type':'application/json',authorization:`Bearer ${w.key}`};
+    const template=await fetch(w.url+'/apply-template',{method:'POST',headers,signal,body:JSON.stringify({messages,add_generation_prompt:true})});if(!template.ok)throw Error('Could not apply model chat template for Studio token budgeting');
+    const formatted=await template.json();const counted=await fetch(w.url+'/tokenize',{method:'POST',headers,signal,body:JSON.stringify({content:formatted.prompt,add_special:false,parse_special:true})});if(!counted.ok)throw Error('Could not count Studio prompt tokens');const tokenized=await counted.json();if(!Array.isArray(tokenized.tokens))throw Error('Invalid tokenizer response');
+    const available=w.config.contextTokens-tokenized.tokens.length-32;if(available<256)throw Error(`Studio context is too large: ${tokenized.tokens.length} input tokens, ${w.config.contextTokens} context. Increase runtime context or request a smaller/named script.`);maxTokens=Math.min(maxTokens,available);
+   }
+   const response=await fetch(w.url+'/v1/chat/completions',{method:'POST',headers:{'content-type':'application/json',authorization:`Bearer ${w.key}`},signal,redirect:'error',body:JSON.stringify({model:'local',messages,stream:true,stream_options:{include_usage:true},cache_prompt:true,id_slot:0,temperature:options.temperature??0.7,max_tokens:maxTokens})});
+   if(!response.ok){let error:any={};try{error=(await response.json()).error||{};}catch{}let detail=typeof error.message==='string'?error.message:'Request rejected';detail=detail.split(w.key).join('[REDACTED]');for(const m of messages)if(m.content)detail=detail.split(m.content).join('[context redacted]');throw Error(`llama-server HTTP ${response.status}: ${detail.slice(0,1200)}${error.n_prompt_tokens!==undefined?` (prompt=${error.n_prompt_tokens}, ctx=${error.n_ctx??w.config.contextTokens})`:''}. Log: ${w.logFile}`);}
    let text='',reasoning='',first:number|null=null,finish='',timings:any,usage:any,ended=false;if(!response.body)throw Error('llama-server returned no stream');
    for await(const frame of parseSSE(response.body,signal)){
     if(frame.data==='[DONE]'){ended=true;break;}const data=JSON.parse(frame.data);if(data.error)throw Error('llama-server generation failed');const choice=data.choices?.[0],delta=choice?.delta;

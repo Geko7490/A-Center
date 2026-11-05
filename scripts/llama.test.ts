@@ -44,7 +44,8 @@ test('Persistent process, cold TTFT, cached context, reconfiguration and cancel 
   await assert.rejects(manager.generate(temp,model,messages),/still running/);await assert.rejects(manager.stop(),/current model/);ctrl.abort();await assert.rejects(slow);
   const recovered=await manager.generate(temp,model,messages);assert.equal(recovered.metrics.workerPid,warm.metrics.workerPid);
   const changed=await manager.generate(temp,model,messages,{device:'none'});assert.equal(launches,2);assert.notEqual(changed.metrics.workerPid,warm.metrics.workerPid);
+  const budgeted=await manager.generate(temp,model,messages,{contextTokens:1024,maxTokens:4096,fitOutputBudget:true});assert.equal(budgeted.text.length,800);
   const log=fs.readFileSync(path.join(temp,'last-server.log'),'utf8');assert(!log.includes('repeat this context'));assert.match(log,/offloaded 24\/25/);
-  const pid=changed.metrics.workerPid!;await manager.stop();assert.equal(manager.snapshot().running,false);assert.throws(()=>process.kill(pid,0));
+  const pid=budgeted.metrics.workerPid!;await manager.stop();assert.equal(manager.snapshot().running,false);assert.throws(()=>process.kill(pid,0));
  }finally{await manager.stop();assert(path.resolve(temp).startsWith(path.resolve(os.tmpdir())+path.sep));fs.rmSync(temp,{recursive:true,force:true});}
 });

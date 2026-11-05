@@ -13,8 +13,12 @@ local root = Instance.new("ScrollingFrame")
 root.Size = UDim2.fromScale(1,1) root.BackgroundColor3 = Color3.fromRGB(22,22,30)
 root.AutomaticCanvasSize = Enum.AutomaticSize.Y root.CanvasSize = UDim2.new() root.ScrollBarThickness = 6 root.Parent = widget
 local layout = Instance.new("UIListLayout") layout.Padding = UDim.new(0,8) layout.Parent = root
+layout.SortOrder = Enum.SortOrder.LayoutOrder
+local fieldOrder = 0
 local function field(class, text, height)
+ fieldOrder += 1
  local x = Instance.new(class) x.Size = UDim2.new(1,-12,0,height) x.BackgroundColor3 = Color3.fromRGB(40,39,52)
+ x.LayoutOrder = fieldOrder
  x.TextColor3 = Color3.fromRGB(240,235,250) x.TextSize = 14 x.Font = Enum.Font.Code x.Text = text x.TextWrapped = true x.Parent = root
  return x
 end

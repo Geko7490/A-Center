@@ -1,4 +1,6 @@
 import {test} from 'node:test';import assert from 'node:assert/strict';import fs from 'node:fs';import os from 'node:os';import path from 'node:path';
+import {studioContext} from '../src/lib/studio-context';
+test('Studio context remains bounded and does not send unrelated script source',()=>{const context={tree:{Name:'Workspace',Children:Array.from({length:250},(_,i)=>({Name:'Part'+i,Path:'Workspace.Part'+i,ClassName:'Part'}))},scripts:[{Path:'ServerScriptService.Unrelated',Source:'private source'.repeat(5000)}]};const text=studioContext(context,'Create a new print script',5000);assert(text.length<=5000);assert(!text.includes('private source'));assert(JSON.parse(text).instances.length<=24);});
 test('Studio task actually generates proposals, waits for approval and verifies read-back',async()=>{
  const temp=fs.mkdtempSync(path.join(os.tmpdir(),'acenter-studio-'));process.env.VEX_STORAGE=temp;process.env.VEX_DATABASE=path.join(temp,'db');process.env.VEX_MIGRATIONS_DIR=path.resolve('drizzle');
  const {db,client,initializeDb}=await import('../src/db');await initializeDb();const {tasks,robloxBridges}=await import('../src/db/schema');const {eq}=await import('drizzle-orm');const {NextRequest}=await import('next/server');
@@ -6,7 +8,8 @@ test('Studio task actually generates proposals, waits for approval and verifies 
  try{
   await db.insert(robloxBridges).values({token:'test-pair',status:'connected',pluginVersion:'1.4.0',lastSeenAt:new Date()});
   aiManager.resolve=async()=>({id:'mock',capabilities:{source:'test fixture'},provider:'evren',owner:'mock',task:'chat',modalities:[]});
-  aiManager.client=async()=>({async *generate(){yield{type:'text',text:JSON.stringify({commands:[{action:'write-script',args:{name:'Main',parent:'ServerScriptService',source:'print("hello")'}}]})};}} as any);
+  let failGeneration=false;
+  aiManager.client=async()=>({async *generate(){if(failGeneration)throw Error('HTTP 400 fixture');yield{type:'text',text:JSON.stringify({commands:[{action:'write-script',args:{name:'Main',parent:'ServerScriptService',source:'print("hello")'}}]})};}} as any);
   const {POST:taskAction}=await import('../src/app/api/tasks/route');const {GET:next}=await import('../src/app/roblox/next-command/route');const {POST:result}=await import('../src/app/roblox/command-result/route');const {GET:panel,POST:panelAction}=await import('../src/app/roblox/panel/route');const {taskCommands,parseStudioPlan}=await import('../src/lib/roblox-tasks');
   const req=(url:string,body?:object)=>new NextRequest('http://127.0.0.1'+(url==='/roblox/next-command'?url+'?version=1.4.0':url),{method:body?'POST':'GET',headers:{'x-vex-token':'test-pair'},...(body?{body:JSON.stringify(body)}:{})});
   assert.equal((await panel(new NextRequest('http://127.0.0.1/roblox/panel'))).status,401);
@@ -33,5 +36,9 @@ test('Studio task actually generates proposals, waits for approval and verifies 
   const check=await wait(async()=>await(await next(req('/roblox/next-command?version=1.4.0'))).json(),v=>v.action==='inspect');await result(req('/roblox/command-result',{id:check.id,ok:true,result:{Name:'Workspace'}}));
   const invalid=(await wait(()=>taskCommands(thirdId),rows=>rows.some(c=>c.status==='proposed'))).find(c=>c.status==='proposed')!;await panelAction(req('/roblox/panel',{action:'approve',id:invalid.id}));const delivered=await(await next(req('/roblox/next-command'))).json();await result(req('/roblox/command-result',{id:delivered.id,ok:true,result:{verified:true,Source:'wrong source'}}));
   const failed=await wait(async()=>(await db.select().from(tasks).where(eq(tasks.id,thirdId)))[0],t=>t.status==='failed');assert.match(failed.error,/read-back/);
+  failGeneration=true;const fourth=await taskAction(req('/api/tasks',{action:'create',kind:'roblox',title:'Retry print script',assignedModel:'evren::mock'}));const fourthId=(await fourth.json()).task.id;
+  const original=await wait(async()=>await(await next(req('/roblox/next-command'))).json(),v=>v.action==='inspect');await result(req('/roblox/command-result',{id:original.id,ok:true,result:{Name:'Workspace'}}));await wait(async()=>(await db.select().from(tasks).where(eq(tasks.id,fourthId)))[0],t=>t.status==='failed');
+  failGeneration=false;assert.equal((await taskAction(req('/api/tasks',{action:'start',id:fourthId}))).status,200);
+  const fresh=await wait(async()=>await(await next(req('/roblox/next-command'))).json(),v=>v.action==='inspect');assert.notEqual(fresh.id,original.id);await result(req('/roblox/command-result',{id:fresh.id,ok:true,result:{Name:'Workspace'}}));await wait(()=>taskCommands(fourthId),rows=>rows.some(c=>c.status==='proposed'));await taskAction(req('/api/tasks',{action:'cancel',id:fourthId}));
  }finally{aiManager.resolve=resolve;aiManager.client=makeClient;await client?.close();assert(path.resolve(temp).startsWith(path.resolve(os.tmpdir())+path.sep));fs.rmSync(temp,{recursive:true,force:true});}
 });

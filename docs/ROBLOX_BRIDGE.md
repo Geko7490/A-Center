@@ -1,5 +1,13 @@
 # Roblox Studio panel 1.4.0 (A-Center 0.4.0)
 
+## 0.4.1 correction
+
+Large Explorer/script snapshots previously produced HTTP 400 on a 4K context. Reproduced with the user's Nemotron GGUF: the old request contained 7355 prompt tokens for a 4096-token context. Context is now a bounded, valid JSON summary (24 instances and relevant complete script entries), rather than a 24000-character cut through raw JSON. Unrelated script source is omitted. Local Studio generation applies the actual model template, tokenizes the prompt and caps output to remaining context with a 32-token margin; fewer than 256 available output tokens produces a clear context-size error instead of a blind request. Other chat requests retain their existing behavior.
+
+An inspection-only failed run can safely regenerate its proposal batch after a fresh inspection. Completed writes, rejected proposals and uncertain delivered mutations are not replayed. Native HTTP errors include the upstream reason/token counts, with request text and the server key redacted. Studio controls now use explicit LayoutOrder, avoiding the alphabetical default order, and Task Manager clears stale error banners when a new action starts. Update the downloaded plugin once to obtain the layout correction; the compatible bridge protocol remains 1.4.0.
+
+The corrected request was verified against the actual Nemotron GGUF at 4K context: it returned a valid write-script proposal containing `print("çalışıyor")`. This is real local model generation, not a claim that the script was applied in native Studio. Regression coverage includes remaining-output budgeting, bounded context without unrelated sources and safe retry after model failure before proposals.
+
 The desktop app exposes authenticated command/result and panel GET/POST routes on stable `http://127.0.0.1:7817/roblox`. The desktop UI/API still uses a private random port and a separate token. The relay rejects browser Origins and all other paths. A port conflict appears in Roblox Integration rather than failing silently.
 
 ## Update the plugin

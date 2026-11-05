@@ -95,7 +95,7 @@ export default function VexApp() {
             <div style={{ width: 30, height: 30, borderRadius: 6, background: "linear-gradient(135deg,#A855F7,#6D28D9)", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 16 }}>V</div>
             <div>
               <div className="font-bold text-[15px] leading-tight">Vex AI Center</div>
-              <div className="text-[11px]" style={{ color: "#A1A1AA" }}>AI Platform · v0.4.0</div>
+              <div className="text-[11px]" style={{ color: "#A1A1AA" }}>AI Platform · v0.4.1</div>
             </div>
           </div>
           <div className="mt-3 flex items-center gap-2 text-[11px]" style={{ color: "#A1A1AA" }}>
@@ -1138,6 +1138,7 @@ function TasksView({go}:{go:(nav:NavKey)=>void}) {
     const t = setInterval(load, 2500); return () => clearInterval(t);
   }, [load]);
   async function run(action: string, id?: string) {
+    setMsg("");
     try {
       if (action === "create") {
         if (!form.title) { setMsg("Title required"); return; }
