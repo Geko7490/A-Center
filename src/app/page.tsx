@@ -3,6 +3,7 @@
 import AIProviders from "@/components/AIProviders";
 import ModelCenter from "@/components/ModelCenter";
 import { parseSSE } from "@/lib/ai/sse";
+import {version as APP_VERSION} from '../../package.json';
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
@@ -95,7 +96,7 @@ export default function VexApp() {
             <div style={{ width: 30, height: 30, borderRadius: 6, background: "linear-gradient(135deg,#A855F7,#6D28D9)", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 16 }}>V</div>
             <div>
               <div className="font-bold text-[15px] leading-tight">Vex AI Center</div>
-              <div className="text-[11px]" style={{ color: "#A1A1AA" }}>AI Platform · v0.4.1</div>
+              <div className="text-[11px]" style={{ color: "#A1A1AA" }}>AI Platform · v{APP_VERSION}</div>
             </div>
           </div>
           <div className="mt-3 flex items-center gap-2 text-[11px]" style={{ color: "#A1A1AA" }}>
