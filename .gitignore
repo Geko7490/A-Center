@@ -1,0 +1,10 @@
+node_modules/
+.next/
+.vex-storage/
+release/
+*.tsbuildinfo
+work/
+*.log
+.env*
+!.env.example
+

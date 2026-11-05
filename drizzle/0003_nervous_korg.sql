@@ -1,0 +1,1 @@
+ALTER TABLE "vex_ai_tool_calls" ADD COLUMN "project_id" text DEFAULT '' NOT NULL;

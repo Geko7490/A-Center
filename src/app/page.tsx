@@ -1,12 +1,20 @@
 "use client";
 
+import AIProviders from "@/components/AIProviders";
+import ModelCenter from "@/components/ModelCenter";
+import { parseSSE } from "@/lib/ai/sse";
+import {version as APP_VERSION} from '../../package.json';
+
 import { useCallback, useEffect, useRef, useState } from "react";
 
 /* ---------- types ---------- */
 type AnyRec = Record<string, any>;
-type NavKey = "dashboard" | "store" | "models" | "runtimes" | "workspace" | "projects" | "github" | "roblox" | "plugins" | "hardware" | "tasks" | "terminal" | "settings";
+type NavKey = "providers" | "modelcenter" | "dashboard" | "store" | "models" | "runtimes" | "workspace" | "projects" | "github" | "roblox" | "plugins" | "hardware" | "tasks" | "terminal" | "settings" | "tutorial";
+type DesktopBridge = { isDesktop: boolean; getApiToken: () => Promise<string>; chooseStorageDirectory?: () => Promise<string | null>; getStoragePresets?: () => Promise<{ label: string; path: string }[]>; restartApp?: () => Promise<void> };
 
 const NAV: { key: NavKey; label: string; icon: string }[] = [
+  { key: "providers", label: "API Providers", icon: "☁" },
+  { key: "modelcenter", label: "Model Center", icon: "◈" },
   { key: "dashboard", label: "Dashboard", icon: "▦" },
   { key: "store", label: "Model Store", icon: "◈" },
   { key: "models", label: "My Models", icon: "⬢" },
@@ -20,10 +28,13 @@ const NAV: { key: NavKey; label: string; icon: string }[] = [
   { key: "tasks", label: "Task Manager", icon: "☰" },
   { key: "terminal", label: "Terminal", icon: "›" },
   { key: "settings", label: "Settings", icon: "⚒" },
+  { key: "tutorial", label: "Kullanım Rehberi", icon: "❔" },
 ];
 
 async function api(path: string, init?: RequestInit): Promise<any> {
-  const res = await fetch(path, { ...init, headers: { "content-type": "application/json", ...(init?.headers || {}) } });
+  const desktop = typeof window !== "undefined" ? (window as Window & { vexDesktop?: DesktopBridge }).vexDesktop : undefined;
+  const token = desktop?.isDesktop ? await desktop.getApiToken() : "";
+  const res = await fetch(path, { ...init, headers: { "content-type": "application/json", ...(token ? { "x-vex-local-token": token } : {}), ...(init?.headers || {}) } });
   const text = await res.text();
   let json: any = {};
   try { json = text ? JSON.parse(text) : {}; } catch { json = { _raw: text }; }
@@ -66,14 +77,14 @@ export default function VexApp() {
     try { setDash(await api("/api/dashboard")); } catch { /* ignore */ }
   }, []);
   useEffect(() => {
-    loadDash();
+    const initial = setTimeout(() => loadDash(), 0);
+    const onlineCheck = setTimeout(() => setOnline(navigator.onLine), 0);
     const t = setInterval(loadDash, 8000);
     const on = () => setOnline(navigator.onLine);
     window.addEventListener("online", on);
     window.addEventListener("offline", on);
-    setOnline(navigator.onLine);
     api("/api/tasks", { method: "POST", body: JSON.stringify({ action: "recover" }) }).catch(() => {});
-    return () => { clearInterval(t); window.removeEventListener("online", on); window.removeEventListener("offline", on); };
+    return () => { clearTimeout(initial); clearTimeout(onlineCheck); clearInterval(t); window.removeEventListener("online", on); window.removeEventListener("offline", on); };
   }, [loadDash]);
 
   return (
@@ -85,7 +96,7 @@ export default function VexApp() {
             <div style={{ width: 30, height: 30, borderRadius: 6, background: "linear-gradient(135deg,#A855F7,#6D28D9)", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 800, fontSize: 16 }}>V</div>
             <div>
               <div className="font-bold text-[15px] leading-tight">Vex AI Center</div>
-              <div className="text-[11px]" style={{ color: "#A1A1AA" }}>Local AI Platform · v1.0</div>
+              <div className="text-[11px]" style={{ color: "#A1A1AA" }}>AI Platform · v{APP_VERSION}</div>
             </div>
           </div>
           <div className="mt-3 flex items-center gap-2 text-[11px]" style={{ color: "#A1A1AA" }}>
@@ -105,28 +116,51 @@ export default function VexApp() {
           <div className="flex justify-between"><span>Models</span><span className="text-white">{dash?.counts?.models ?? "–"}</span></div>
           <div className="flex justify-between"><span>Running</span><span className="text-white">{dash?.counts?.running ?? "–"}</span></div>
           <div className="flex justify-between"><span>Ollama</span><span style={{ color: dash?.ollama?.available ? "#22c55e" : "#f87171" }}>{dash?.ollama?.available ? "reachable" : "offline"}</span></div>
-          <div className="mt-1">100% local inference · no cloud APIs</div>
+          <div className="mt-1">Local + optional cloud AI</div>
         </div>
       </aside>
 
       {/* Main */}
       <main className="flex-1 overflow-y-auto p-5" style={{ minWidth: 0 }}>
+        {nav === "providers" && <AIProviders api={api} select={(model)=>{sessionStorage.setItem("acenter-selected-model",model);setNav("workspace");}} />}
+        {nav === "modelcenter" && <ModelCenter api={api} select={(model) => { sessionStorage.setItem("acenter-selected-model", model); setNav("workspace"); }} />}
         {nav === "dashboard" && <DashboardView dash={dash} reload={loadDash} go={setNav} />}
         {nav === "store" && <StoreView />}
         {nav === "models" && <ModelsView />}
         {nav === "runtimes" && <RuntimesView />}
         {nav === "workspace" && <WorkspaceView />}
         {nav === "projects" && <ProjectsView />}
-        {nav === "github" && <GithubView />}
+        {nav === "github" && <GithubView go={setNav} />}
         {nav === "roblox" && <RobloxView />}
         {nav === "plugins" && <PluginsView />}
         {nav === "hardware" && <HardwareView />}
-        {nav === "tasks" && <TasksView />}
+        {nav === "tasks" && <TasksView go={setNav} />}
         {nav === "terminal" && <TerminalView />}
         {nav === "settings" && <SettingsView />}
+        {nav === "tutorial" && <TutorialView go={setNav} />}
       </main>
     </div>
   );
+}
+
+/* ================= KULLANIM REHBERI ================= */
+function TutorialView({ go }: { go: (n: NavKey) => void }) {
+  const sections = [
+    { title: "1 · Depolama yerini D: sürücüsüne taşı", text: "Settings → D: drive → Save settings. A-Center D:\\A-Center\models, downloads, workspace, runtimes ve diğer klasörleri oluşturur; mevcut dosyaları kopyalar ve yeniden başlar. Kaynak dosyalar yedek olarak korunur; yeni konumu doğruladıktan sonra eski model dosyalarını silebilirsin. Taşıma sırasında indirmeleri iptal et, runtime'ları durdur ve D: sürücüsünde model boyutundan fazla boş alan bırak. PGlite veritabanı küçük kaldığı için kullanıcı profilindeki C: konumunda kalır." },
+    { title: "2 · Hugging Face'ten model bul ve indir", text: "Model Store'da Hugging Face kaynağını seçip model adıyla ara. Belirli bir repo için owner/name veya Hugging Face URL'sini repo kutusuna yapıştır, Load repository files'e bas. GGUF dosyaları boyut ve quant etiketiyle görünür; istediğinin Download düğmesine bas. İndirme tamamlanınca dosya My Models'a eklenir." },
+    { title: "3 · Bu laptopta Luau Devstral çalıştır", text: "Model Store'daki RX 6700M hızlı seçeneği Luau Devstral Q2_K dosyasını indirir. Bu yaklaşık 8.89 GB ağırlığındadır. Settings değil, Runtime Manager → Apply hybrid profile ile 8 CPU thread, auto VRAM layers ve 4K context ayarla. Vulkan destekli Windows llama.cpp paketindeki llama-server.exe ve yan DLL'leri ekrandaki llama.cpp runtime klasörüne koy; sonra AI Workspace'te modeli seç." },
+    { title: "4 · Hibrit çalışma ne yapar?", text: "llama.cpp --n-gpu-layers auto ve --fit on ile GPU belleğine sığan katmanları RX 6700M'e, kalanını 32 GB sistem belleği ve Ryzen 7 5800H işlemciye bırakır. Modelin tamamı VRAM'e sığmak zorunda değildir; CPU/RAM desteği hızın düşmesine yol açabilir. GPU layers alanında auto önerilir. Bağlamı 4K'dan başlat; bellek veya hız sorunu olursa 2K'ya indir." },
+    { title: "5 · Roblox Studio bağlantısı", text: "Roblox Integration → Download Plugin; VexBridge.lua dosyasını Studio → Plugins → Plugins Folder içine koyup eski VexBridge kopyasını değiştir. Studio'yu yeniden başlat, localhost HTTP iznini ver. A-Center'da Connect to Studio, Studio araç çubuğunda VexBridge'e bas. Yeşil durum gerçek Studio yanıtını gösterir; Self-test bağlantı kurmaz." },
+    { title: "6 · EVREN / NVIDIA ve ajan araçları", text: "API Providers → anahtarını kaydet, EVREN şartlarını okuyup onayla, sağlayıcıyı etkinleştir ve modelleri yenile. Model Center'dan model seç. AI Workspace'te Agent modu ve proje seçilirse doğrulanmış tool calling modelleri araç önerileri üretebilir. Öneriyi inceleyip onayla veya reddet; gerçek sonuçlarla ajanı devam ettir. Terminal için projenin terminal iznini ayrıca açmalısın. Bulut mesajları, ekler ve onaylı araç sonuçları sağlayıcıya gönderilir." },
+    { title: "7 · Yerel AI ile klasöründeki dosyaları düzenle", text: "GitHub Manager → Local Dir alanına mevcut klasörün tam yolunu yaz → Local Dir ile yerel AI. Bağlı bir deponun Yerel AI ile dosyaları düzenle düğmesini de kullanabilirsin. AI Workspace Agent modunda yerel GGUF veya Ollama modelini seçip dosya isteğini yaz. Öneriler bölümünde okuma işlemini onayla; gerçek sonuçlarla devam ettir. Yazma önerisinin önce/sonra içeriğini inceleyip onayla. Dosya ancak bu onayla kaydedilir; önceki içerik Project Manager geçmişinde yedeklenir. Read only klasörler değiştirilemez. Dosya öneriden sonra değiştiyse eski öneriyi reddedip yeniden okut." },
+    { title: "Sorun giderme", text: "D: taşıma cross-origin hatası verirse A-Center'ı güncel kurulum paketiyle yeniden kurup tekrar dene. Taşıma etkin indirme/runtime varken başlamaz. Hugging Face araması için internet gerekir. GGUF sohbeti için Vulkan destekli llama-server.exe şarttır; yoksa Runtime Manager'daki gösterilen klasöre ekle. İndirme tamamlandı ama model çalışmıyorsa llama-cli sürümünü ve modelin My Models'daki dosya yolunu kontrol et." },
+  ];
+  return <div>
+    <h1 className="text-xl font-bold mb-1">A-Center kullanım rehberi</h1>
+    <p className="text-[13px] mb-4" style={{ color: "#A1A1AA" }}>Bu uygulamada ayarlar, modeller, hibrit çalışma ve Roblox bağlantısı nasıl kullanılır?</p>
+    <div className="grid gap-3" style={{ maxWidth: 900 }}>{sections.map((section) => <section key={section.title} className="vex-panel p-4"><h2 className="font-semibold text-[14px] mb-2">{section.title}</h2><p className="text-[13px] leading-6" style={{ color: "#c4c4cc" }}>{section.text}</p></section>)}</div>
+    <button className="vex-btn mt-4" onClick={() => go("settings")}>Ayarları aç</button>
+  </div>;
 }
 
 /* ================= DASHBOARD ================= */
@@ -161,8 +195,8 @@ function DashboardView({ dash, reload, go }: { dash: any; reload: () => void; go
           <div className="font-semibold mb-2">Hardware Snapshot</div>
           {hw ? (
             <div className="text-[13px] space-y-2" style={{ color: "#d4d4d8" }}>
-              <div><span style={{ color: "#A1A1AA" }}>CPU:</span> {hw.cpu.model} · {hw.cpu.cores} cores · {hw.cpu.usage}%</div>
-              <div className="vex-bar"><div style={{ width: `${hw.cpu.usage}%` }} /></div>
+              <div><span style={{ color: "#A1A1AA" }}>CPU:</span> {hw.cpu.model} · {hw.cpu.cores} cores · {hw.cpu.usage === null ? "unavailable" : `${hw.cpu.usage}%`}</div>
+              <div className="vex-bar"><div style={{ width: `${hw.cpu.usage === null ? "unavailable" : `${hw.cpu.usage}%`}` }} /></div>
               <div><span style={{ color: "#A1A1AA" }}>RAM:</span> {fmtBytes(hw.mem.total - hw.mem.free)} / {fmtBytes(hw.mem.total)} ({memPct}%)</div>
               <div className="vex-bar"><div style={{ width: `${memPct}%` }} /></div>
               <div><span style={{ color: "#A1A1AA" }}>GPU:</span> {hw.gpus?.length ? hw.gpus.map((g: any) => `${g.name} (${g.backend})`).join(", ") : "no discrete GPU detected — CPU fallback ready"}</div>
@@ -195,7 +229,7 @@ function DashboardView({ dash, reload, go }: { dash: any; reload: () => void; go
       <div className="vex-panel p-4 mt-4">
         <div className="font-semibold mb-1">Offline-first guarantee</div>
         <div className="text-[13px]" style={{ color: "#A1A1AA" }}>
-          Internet is used <b className="text-white">only</b> for downloads (models, runtimes, plugins, git sync). Inference, chat, project editing, Roblox bridge, tasks and hardware monitoring run fully offline. No telemetry, no cloud AI APIs, no mandatory online checks.
+          Local models run on this computer. Optional EVREN and NVIDIA models send selected chat context and approved tool results to their provider. Downloads and git sync also require internet.
         </div>
       </div>
     </div>
@@ -214,7 +248,10 @@ function StoreView() {
   const [loading, setLoading] = useState(false);
   const [downloads, setDownloads] = useState<any[]>([]);
   const [msg, setMsg] = useState("");
-  const [fileName, setFileName] = useState<Record<string, string>>({});
+  const [repoInput, setRepoInput] = useState("mradermacher/Luau-Devstral-24B-Instruct-v0.2-GGUF");
+  const [repoFiles, setRepoFiles] = useState<any[]>([]);
+  const [repoLoaded, setRepoLoaded] = useState("");
+  const [repoLoading, setRepoLoading] = useState(false);
 
   const search = useCallback(async () => {
     setLoading(true); setMsg("");
@@ -233,21 +270,38 @@ function StoreView() {
   async function startDownload(m: any) {
     setMsg("");
     try {
-      let url = "";
       if (m.source === "ollama") {
         // Ollama models install via `ollama pull` — register as managed model instead of HTTP download
         const r = await api("/api/models", { method: "POST", body: JSON.stringify({ name: m.name, repo: m.repo, format: "Ollama", quantization: quant === "all" ? "Q4_K_M" : quant, description: m.description, category: m.category, installPath: `ollama:${m.name}` }) });
         setMsg(`Registered ${r.model.name}. Run: ollama pull ${m.name}  — then Start it from My Models.`);
         return;
       }
-      const fn = (fileName[m.id] || "").trim();
-      if (!fn) { setMsg("Enter the GGUF file name for this HF repo (e.g. model.Q4_K_M.gguf) — naming varies per repo, so Vex never guesses silently."); return; }
-      url = `${m.guessFile}${fn}`;
-      await api("/api/downloads", { method: "POST", body: JSON.stringify({ url, modelName: `${m.name}-${fn.replace(/\.gguf$/i, "")}`, repo: m.repo, quantization: quant === "all" ? "Q4_K_M" : quant }) });
-      setMsg(`Download queued: ${m.repo}/${fn}`);
-      loadDl();
+      openFiles(m.repo);
     } catch (e: any) { setMsg(e.message); }
   }
+  async function loadRepoFiles(repo = repoInput) {
+    setRepoLoading(true); setRepoLoaded(""); setRepoFiles([]); setMsg("");
+    try {
+      const r = await api(`/api/store/files?repo=${encodeURIComponent(repo)}`);
+      setRepoInput(r.repo); setRepoLoaded(r.repo); setRepoFiles(r.files || []);
+      if (!r.files?.length) setMsg("This Hugging Face repo has no GGUF files.");
+    } catch (e: any) { setMsg(e.message); }
+    finally { setRepoLoading(false); }
+  }
+  async function downloadRepoFile(repo: string, file: any) {
+    try {
+      const encodedFile = file.name.split("/").map(encodeURIComponent).join("/");
+      const url = `https://huggingface.co/${repo}/resolve/main/${encodedFile}`;
+      const modelName = `${repo.split("/").pop()}-${file.name.split("/").pop()?.replace(/\.gguf$/i, "")}`;
+      await api("/api/downloads", { method: "POST", body: JSON.stringify({ url, modelName, repo, quantization: file.quantization }) });
+      setMsg(`Download queued: ${repo}/${file.name}`); loadDl();
+    } catch (e: any) { setMsg(e.message); }
+  }
+  function downloadLuauPreset() {
+    const repo = "mradermacher/Luau-Devstral-24B-Instruct-v0.2-GGUF";
+    void downloadRepoFile(repo, { name: "Luau-Devstral-24B-Instruct-v0.2.Q2_K.gguf", sizeBytes: 8.89 * 1024 ** 3, quantization: "Q2_K" });
+  }
+  function openFiles(repo: string) { setRepoInput(repo); void loadRepoFiles(repo); }
   async function dlAction(id: string, action: string) {
     try { await api("/api/downloads", { method: "POST", body: JSON.stringify({ id, action }) }); loadDl(); } catch (e: any) { setMsg(e.message); }
   }
@@ -267,6 +321,26 @@ function StoreView() {
         </div>
         {hfError && <div className="text-[12px] mt-2" style={{ color: "#fbbf24" }}>Hugging Face: {hfError} — showing Ollama catalog (offline-capable).</div>}
         {msg && <div className="text-[12px] mt-2" style={{ color: "#A855F7" }}>{msg}</div>}
+      </div>
+
+      <div className="vex-panel p-3 mb-3">
+        <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+          <div><div className="font-semibold text-[14px]">Hardware quick pick · RX 6700M</div><div className="text-[11px]" style={{ color: "#A1A1AA" }}>Luau coding · Q2_K · about 8.89 GB. 10 GB VRAM means keep context modest; full GPU offload is not guaranteed.</div></div>
+          <div className="flex flex-wrap gap-2"><button className="vex-btn" onClick={downloadLuauPreset}>Download Luau Devstral Q2_K</button><button className="vex-btn-ghost" onClick={() => openFiles("mradermacher/Luau-Devstral-24B-Instruct-v0.2-GGUF")}>Browse files</button></div>
+        </div>
+        <div className="flex flex-wrap gap-2 items-center">
+          <input className="vex-input" style={{ minWidth: 320, flex: 1 }} value={repoInput} onChange={(e) => setRepoInput(e.target.value)} onKeyDown={(e) => e.key === "Enter" && loadRepoFiles()} placeholder="Hugging Face repo: owner/name or URL" />
+          <button className="vex-btn" onClick={() => loadRepoFiles()} disabled={repoLoading}>{repoLoading ? "Loading…" : "Load repository files"}</button>
+        </div>
+        {repoLoaded && <div className="mt-3">
+          <div className="text-[12px] mb-2" style={{ color: "#A1A1AA" }}>{repoLoaded} · {repoFiles.length} GGUF files</div>
+          <div className="grid gap-2" style={{ maxHeight: 280, overflowY: "auto" }}>
+            {repoFiles.map((file) => <div key={file.name} className="vex-panel2 p-2 flex flex-wrap items-center justify-between gap-2">
+              <div className="min-w-0"><div className="text-[12px] vex-code break-all">{file.name}</div><div className="text-[11px]" style={{ color: "#71717a" }}>{file.quantization} · {file.sizeBytes ? fmtBytes(file.sizeBytes) : "size unavailable"}</div></div>
+              <button className="vex-btn-ghost" onClick={() => downloadRepoFile(repoLoaded, file)}>Download</button>
+            </div>)}
+          </div>
+        </div>}
       </div>
 
       {downloads.length > 0 && (
@@ -310,9 +384,9 @@ function StoreView() {
             </div>
             <div className="text-[11px] mt-1" style={{ color: "#71717a" }}>Runtimes: {(m.runtimes || []).join(", ")} · Quants: {(m.quants || []).slice(0, 5).join(", ")}</div>
             {m.source === "huggingface" && (
-              <input className="vex-input mt-2" placeholder="GGUF file name, e.g. Meta-Llama-3.1-8B.Q4_K_M.gguf" value={fileName[m.id] || ""} onChange={(e) => setFileName({ ...fileName, [m.id]: e.target.value })} />
+              <button className="vex-btn-ghost mt-2 w-full" onClick={() => openFiles(m.repo)}>Browse files in this Hugging Face repo</button>
             )}
-            <button className="vex-btn mt-2 w-full" onClick={() => startDownload(m)}>{m.source === "ollama" ? "Register + Pull via Ollama" : "Download GGUF"}</button>
+            <button className="vex-btn mt-2 w-full" onClick={() => m.source === "ollama" ? startDownload(m) : openFiles(m.repo)}>{m.source === "ollama" ? "Register + Pull via Ollama" : "Browse and download GGUF files"}</button>
           </div>
         ))}
       </div>
@@ -333,7 +407,7 @@ function ModelsView() {
   const load = useCallback(async () => {
     try { const r = await api("/api/models"); setModels(r.models || []); } catch (e: any) { setMsg(e.message); }
   }, []);
-  useEffect(() => { load(); const t = setInterval(load, 5000); return () => clearInterval(t); }, [load]);
+  useEffect(() => { const initial = setTimeout(() => load(), 0); const t = setInterval(load, 5000); return () => { clearTimeout(initial); clearInterval(t); }; }, [load]);
 
   async function act(id: string, action: string, extra?: any) {
     setBusy(id + action); setMsg("");
@@ -370,7 +444,7 @@ function ModelsView() {
         <h1 className="text-xl font-bold">My Models</h1>
         <button className="vex-btn" onClick={checkAll} disabled={testing}>{testing ? "Testing…" : "✓ Check Models"}</button>
       </div>
-      <p className="text-[13px] mb-3" style={{ color: "#A1A1AA" }}>A model is <b className="text-white">working</b> only after files validate, runtime + hardware checks pass, and a real prompt returns output. Multiple versions supported.</p>
+      <p className="text-[13px] mb-3" style={{ color: "#A1A1AA" }}>Inference starts on demand in AI Workspace. A model is <b className="text-white">working</b> only after files validate, runtime + hardware checks pass, and a real prompt returns output. Multiple versions supported.</p>
       {msg && <div className="vex-panel p-2.5 mb-3 text-[13px] vex-pre" style={{ borderColor: "#A855F7" }}>{msg}</div>}
       {testReport && (
         <div className="grid gap-3 mb-3" style={{ gridTemplateColumns: "repeat(auto-fit,minmax(260px,1fr))" }}>
@@ -403,7 +477,7 @@ function ModelsView() {
             <div className="text-[11px] mt-1" style={{ color: "#71717a" }}>Runtimes: {(m.runtimes || []).join(", ")} · active: <b className="text-white">{m.activeRuntime}</b> · compat: {m.compatibilityStatus} · used: {timeAgo(m.lastUsedAt)}</div>
             <div className="text-[12px] mt-1" style={{ color: "#A1A1AA" }}>{m.description}</div>
             <div className="flex flex-wrap gap-2 mt-2">
-              {m.status !== "running" ? <button className="vex-btn" disabled={!!busy} onClick={() => act(m.id, "start")}>Start</button>
+              {m.status !== "running" ? <button className="vex-btn" disabled={!!busy} onClick={() => act(m.id, "start")}>Check readiness</button>
                 : <button className="vex-btn-ghost" disabled={!!busy} onClick={() => act(m.id, "stop")}>Stop</button>}
               <button className="vex-btn-ghost" disabled={!!busy} onClick={() => act(m.id, "test")}>Test</button>
               <select className="vex-input" style={{ width: 130 }} value={m.activeRuntime} onChange={(e) => act(m.id, "set-runtime", { runtime: e.target.value })}>
@@ -420,24 +494,34 @@ function ModelsView() {
 
 /* ================= RUNTIMES ================= */
 function RuntimesView() {
+  const [devices,setDevices]=useState<any[]>([]);
+  const [server,setServer]=useState<any>(null);
   const [runtimes, setRuntimes] = useState<any[]>([]);
   const [ollama, setOllama] = useState<any>(null);
   const [msg, setMsg] = useState("");
   const [cfg, setCfg] = useState<Record<string, any>>({});
 
-  const load = useCallback(async () => {
-    try { const r = await api("/api/runtimes"); setRuntimes(r.runtimes || []); setOllama(r.ollama); } catch (e: any) { setMsg(e.message); }
+  const load = useCallback(async (refresh=false) => {
+    try { const r = await api(`/api/runtimes${refresh?'?refresh=1':''}`); setRuntimes(r.runtimes || []); setOllama(r.ollama);setDevices(r.devices||[]);setServer(r.server); } catch (e: any) { setMsg(e.message); }
   }, []);
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { const initial = setTimeout(() => load(), 0); return () => clearTimeout(initial); }, [load]);
   async function act(name: string, action: string, extra?: any) {
     setMsg("");
     try { await api("/api/runtimes", { method: "POST", body: JSON.stringify({ name, action, ...extra }) }); load(); }
     catch (e: any) { setMsg(e.message); }
   }
+  async function applyHybridPreset() {
+    const config = { cpuThreads: 8, gpuLayers: "auto", ctxSize: 4096,device:devices.find(d=>/RX\s*6700M/i.test(d.name))?.id||'auto',fitTargetMiB:1024,cacheRamMiB:1024 };
+    setCfg((current) => ({ ...current, "llama.cpp": config }));
+    await act("llama.cpp", "config", { config });
+    setMsg("RX 6700M + 32 GB RAM profile saved: 8 CPU threads, automatic VRAM fit, 4K context.");
+  }
   return (
     <div>
-      <div className="flex items-center justify-between mb-1"><h1 className="text-xl font-bold">Runtime Manager</h1><button className="vex-btn-ghost" onClick={load}>Re-detect</button></div>
+      <div className="flex items-center justify-between mb-1"><h1 className="text-xl font-bold">Runtime Manager</h1><button className="vex-btn-ghost" onClick={()=>load(true)}>Re-detect</button></div>
       <p className="text-[13px] mb-3" style={{ color: "#A1A1AA" }}>Modular adapters: llama.cpp · Ollama · ONNX · Transformers. Auto-selection inspects format → hardware → memory before loading. CUDA never required.</p>
+      <div className="vex-panel p-3 mb-3 text-[12px]" style={{ color: "#A1A1AA" }}>GGUF modelleri kalıcı llama-server ile bellekte kalır. Tam Vulkan derlemesinin llama-server.exe ve DLL dosyalarını runtime klasörüne koy. RX 6700M profili GPU belleğinde 1 GB pay bırakır; kalan katmanlar RAM/CPU kullanır. <button className="vex-btn-ghost mt-2" onClick={applyHybridPreset}>Apply hybrid profile (8 threads · RX 6700M · auto VRAM · 4K)</button></div>
+      <div className="vex-panel p-3 mb-3 text-[12px]">Sunucu: {server?.ready?'Model bellekte':server?.running?'Yükleniyor':'Kapalı'} · GPU: {server?.device||'—'} · Offload: {server?.offloadedLayers??'?'} / {server?.totalLayers??'?'} katman · PID: {server?.workerPid||'—'}{server?.ready&&<button className="vex-btn-danger ml-2" onClick={()=>act('llama.cpp','stop')}>Modeli bellekten çıkar</button>}{server?.logFile&&<div className="vex-code">Gerçek yükleme kaydı: {server.logFile}</div>}</div>
       {msg && <div className="vex-panel p-2.5 mb-3 text-[13px]" style={{ borderColor: "#A855F7" }}>{msg}</div>}
       <div className="vex-panel p-3 mb-3 text-[13px]">
         <b>Ollama live probe:</b> {ollama?.available ? <span style={{ color: "#4ade80" }}>reachable — {ollama.models.length} models: {(ollama.models || []).join(", ") || "(none pulled)"}</span> : <span style={{ color: "#f87171" }}>offline ({ollama?.error || "not running"}) — start `ollama serve` for real inference</span>}
@@ -451,10 +535,11 @@ function RuntimesView() {
             </div>
             <div className="text-[12px] mt-1 vex-code" style={{ color: "#A1A1AA" }}>detect: {r.detected}</div>
             <div className="text-[11px] vex-code truncate" style={{ color: "#71717a" }}>{r.installPath}</div>
+            {r.name==='llama.cpp'&&<label className="block text-[12px] mt-2">GPU / backend<select className="vex-input" value={cfg[r.name]?.device??r.config?.device??'auto'} onChange={e=>setCfg(c=>({...c,[r.name]:{...c[r.name],device:e.target.value}}))}><option value="auto">Otomatik (RX 6700M öncelikli)</option><option value="none">CPU</option>{devices.map(d=><option key={d.id} value={d.id}>{d.id} · {d.name} · {Math.round(d.freeMiB)} MiB boş</option>)}</select></label>}
             <div className="grid gap-2 mt-2" style={{ gridTemplateColumns: "1fr 1fr 1fr" }}>
-              <label className="text-[11px]" style={{ color: "#A1A1AA" }}>CPU threads<input className="vex-input mt-1" type="number" defaultValue={r.config?.cpuThreads ?? 4} onChange={(e) => setCfg({ ...cfg, [r.name]: { ...(cfg[r.name] || {}), cpuThreads: Number(e.target.value) } })} /></label>
-              <label className="text-[11px]" style={{ color: "#A1A1AA" }}>GPU layers<input className="vex-input mt-1" type="number" defaultValue={r.config?.gpuLayers ?? 0} onChange={(e) => setCfg({ ...cfg, [r.name]: { ...(cfg[r.name] || {}), gpuLayers: Number(e.target.value) } })} /></label>
-              <label className="text-[11px]" style={{ color: "#A1A1AA" }}>Ctx size<input className="vex-input mt-1" type="number" defaultValue={r.config?.ctxSize ?? 4096} onChange={(e) => setCfg({ ...cfg, [r.name]: { ...(cfg[r.name] || {}), ctxSize: Number(e.target.value) } })} /></label>
+              <label className="text-[11px]" style={{ color: "#A1A1AA" }}>CPU threads<input className="vex-input mt-1" type="number" value={cfg[r.name]?.cpuThreads ?? r.config?.cpuThreads ?? 8} onChange={(e) => setCfg({ ...cfg, [r.name]: { ...(cfg[r.name] || {}), cpuThreads: Number(e.target.value) } })} /></label>
+              <label className="text-[11px]" style={{ color: "#A1A1AA" }}>GPU layers (auto/number)<input className="vex-input mt-1" type="text" value={cfg[r.name]?.gpuLayers ?? r.config?.gpuLayers ?? "auto"} onChange={(e) => { const raw = e.target.value; setCfg({ ...cfg, [r.name]: { ...(cfg[r.name] || {}), gpuLayers: /^\d+$/.test(raw) ? Number(raw) : raw } }); }} /></label>
+              <label className="text-[11px]" style={{ color: "#A1A1AA" }}>Ctx size<input className="vex-input mt-1" type="number" value={cfg[r.name]?.ctxSize ?? r.config?.ctxSize ?? 4096} onChange={(e) => setCfg({ ...cfg, [r.name]: { ...(cfg[r.name] || {}), ctxSize: Number(e.target.value) } })} /></label>
             </div>
             <div className="flex flex-wrap gap-2 mt-2">
               {!r.installed ? <button className="vex-btn" onClick={() => act(r.name, "install")}>Install</button>
@@ -489,66 +574,116 @@ function WorkspaceView() {
   const [engine, setEngine] = useState("");
   const [sending, setSending] = useState(false);
   const [attach, setAttach] = useState("");
+  const [activity,setActivity]=useState("");
+  const [thinking,setThinking]=useState<boolean|undefined>(undefined);
+  const [effort,setEffort]=useState("");
+  const [maxTokens,setMaxTokens]=useState(2048);
+  const [image,setImage]=useState("");
+  const [projectId,setProjectId]=useState("");
+  const [projects,setProjects]=useState<any[]>([]);
+  const [calls,setCalls]=useState<any[]>([]);
+  const [modelError,setModelError]=useState("");
+  const abortRef=useRef<AbortController|null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   const loadConvs = useCallback(async (id?: string) => {
     const r = await api(id ? `/api/chat?conversationId=${id}` : "/api/chat");
     setConvs(r.conversations || []);
-    if (id && r.messages) setMsgs(r.messages);
+    if (id && r.messages) { setMsgs(r.messages); setCalls((await api(`/api/ai/tools?conversationId=${id}`)).calls || []); }
     return r;
   }, []);
   useEffect(() => {
-    loadConvs().then((r) => {
-      if (r.conversations?.[0]) { setCid(r.conversations[0].id); loadConvs(r.conversations[0].id); const c = r.conversations[0]; setMode(c.mode); setSys(c.systemPrompt || ""); setTemp(c.temperature); setCtx(c.contextTokens); setModelId(c.modelId || ""); setPlanning(c.planningModel || ""); setCoding(c.codingModel || ""); setUtility(c.utilityModel || ""); }
+    const initial=setTimeout(()=>{
+    loadConvs().then(async (r) => {
+      if (r.conversations?.[0]) { setCid(r.conversations[0].id); await loadConvs(r.conversations[0].id); const c = r.conversations[0]; setMode(c.mode); setSys(c.systemPrompt || ""); setTemp(c.temperature); setCtx(c.contextTokens); setModelId(c.modelId || ""); setPlanning(c.planningModel || ""); setCoding(c.codingModel || ""); setUtility(c.utilityModel || ""); setProjectId(c.providerData?.projectId||""); setThinking(c.providerData?.thinking); setEffort(c.providerData?.effort||""); setMaxTokens(c.providerData?.maxTokens||2048); }
+      else {const created=await api("/api/chat",{method:"POST",body:JSON.stringify({action:"create"})});setCid(created.conversation.id);await loadConvs(created.conversation.id);}
+      const preferred=sessionStorage.getItem("acenter-selected-model"); if(preferred){setModelId(preferred);sessionStorage.removeItem("acenter-selected-model");}
+      const localProject=sessionStorage.getItem('acenter-local-project');
+      if(localProject){
+        sessionStorage.removeItem('acenter-local-project');
+        const catalog=await api('/api/ai/models');
+        const local=catalog.models?.find((m:any)=>m.provider==='local'&&(m.format==='GGUF'||m.format==='Ollama'||m.activeRuntime==='ollama'));
+        const result=await api('/api/chat',{method:'POST',body:JSON.stringify({action:'create',mode:'agent',title:'Local Dir · dosya ajanı',modelId:local?.key||'',providerData:{projectId:localProject}})});
+        setCid(result.conversation.id);setMode('agent');setProjectId(localProject);setModelId(local?.key||'');setMsgs([]);setCalls([]);await loadConvs(result.conversation.id);
+      }
+      const taskText=sessionStorage.getItem("acenter-agent-task");
+      if(taskText){sessionStorage.removeItem("acenter-agent-task");const task=JSON.parse(taskText);void api("/api/chat",{method:"POST",body:JSON.stringify({action:"create",mode:"agent",title:task.title,modelId:task.model||"",providerData:{taskId:task.id,projectId:task.projectId||""}})}).then(result=>{setCid(result.conversation.id);setMode("agent");setModelId(task.model||"");setProjectId(task.projectId||"");setPrompt(task.title);setMsgs([]);void loadConvs(result.conversation.id);});}
     });
-    api("/api/models").then((r) => setModels(r.models || [])).catch(() => {});
+    api("/api/ai/models").then((r) => setModels((r.models || []).map((m:any)=>({...m,name:m.key,status:m.provider})))).catch(() => {});
+    api("/api/projects").then(r=>setProjects(r.projects||[])).catch(()=>{});
+    },0);
+    return()=>clearTimeout(initial);
   }, [loadConvs]);
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: "smooth" }); }, [msgs]);
 
+  useEffect(()=>()=>abortRef.current?.abort(),[]);
+  const selected=models.find(m=>m.name===modelId);
+  const cloud=modelId.includes("::");
+  useEffect(()=>{
+    if(!modelId.includes("::"))return;
+    let active=true;const [provider,...parts]=modelId.split("::");
+    api("/api/providers",{method:"POST",body:JSON.stringify({provider,action:"model",model:parts.join("::")})}).then(r=>{if(active){setModels(ms=>ms.map(m=>m.name===modelId?{...m,...r.model,name:modelId}:m));if(r.model.capabilities.maxOutput)setMaxTokens(n=>Math.min(n,r.model.capabilities.maxOutput));setModelError("");}}).catch((e:any)=>{if(active)setModelError(e.message);});
+    return()=>{active=false;};
+  },[modelId]);
   async function createConv() {
+    if(sending)return;
     const r = await api("/api/chat", { method: "POST", body: JSON.stringify({ action: "create", mode, title: "New conversation" }) });
     setCid(r.conversation.id); setMsgs([]); loadConvs(r.conversation.id);
   }
   async function saveSettings() {
     if (!cid) return;
-    await api("/api/chat", { method: "POST", body: JSON.stringify({ action: "update", conversationId: cid, mode, modelId, systemPrompt: sys, temperature: temp, contextTokens: ctx, planningModel: planning, codingModel: coding, utilityModel: utility }) });
+    await api("/api/chat", { method: "POST", body: JSON.stringify({ action: "update", conversationId: cid, mode, modelId, systemPrompt: sys, temperature: temp, contextTokens: ctx, planningModel: planning, codingModel: coding, utilityModel: utility, providerData: { projectId, thinking, effort, maxTokens } }) });
   }
-  async function send() {
-    if (!cid || !prompt.trim() || sending) return;
-    setSending(true);
-    const p = prompt; setPrompt("");
-    setMsgs((m) => [...m, { role: "user", content: p, createdAt: new Date().toISOString() }]);
+  async function send(continuation=false) {
+    if (!cid || (!continuation&&!prompt.trim()) || sending) return;
+    setSending(true);setActivity("İstek hazırlanıyor");
+    const abort=new AbortController();abortRef.current=abort;
+    const p=prompt;if(!continuation)setPrompt("");
+    if(!continuation)setMsgs(m=>[...m,{role:"user",content:p,createdAt:new Date().toISOString()}]);
+    const streamId=crypto.randomUUID();let streamed=false;
     try {
       await saveSettings();
-      const r = await api("/api/chat", { method: "POST", body: JSON.stringify({ conversationId: cid, prompt: p, modelId, attachment: attach }) });
-      setEngine(r.engine || "");
-      // streaming effect: reveal progressively
-      const full: string = r.message.content;
-      let shown = "";
-      setMsgs((m) => [...m, { ...r.message, content: "" }]);
-      const chunks = full.match(/[\s\S]{1,120}/g) || [full];
-      for (const c of chunks) {
-        shown += c;
-        const s = shown;
-        setMsgs((m) => m.map((x, i) => (i === m.length - 1 ? { ...x, content: s } : x)));
-        await new Promise((res) => setTimeout(res, 30));
-      }
-    } catch (e: any) {
-      setMsgs((m) => [...m, { role: "assistant", content: `Error: ${e.message}`, createdAt: new Date().toISOString() }]);
-    }
-    setSending(false);
+      const desktop=(window as Window & {vexDesktop?:DesktopBridge}).vexDesktop;
+      const token=desktop?.isDesktop?await desktop.getApiToken():"";
+      setActivity("Modele bağlanılıyor");
+      const response=await fetch("/api/chat",{method:"POST",signal:abort.signal,headers:{"content-type":"application/json",...(token?{"x-vex-local-token":token}:{})},body:JSON.stringify({stream:true,conversationId:cid,prompt:continuation?undefined:p,continue:continuation,modelId,attachment:attach,maxTokens,thinking,effort:(selected?.capabilities?.effortValues?.includes(effort)||(!selected?.capabilities?.effortValues&&(selected?.capabilities?.parameters?.includes("reasoning_effort")||selected?.capabilities?.reasoningStyle==="effort")))?effort||undefined:undefined,images:image&&selected?.capabilities?.vision?[image]:undefined})});
+      if(!response.ok){const error=await response.json();throw Error(`${error.error}${error.retryAfter!==undefined?` · Retry-After: ${error.retryAfter}s`:""}`);}
+      if(response.headers.get("content-type")?.includes("text/event-stream")){
+        streamed=true;setMsgs(m=>[...m,{role:"assistant",content:"",metadata:{},_streamId:streamId}]);
+        let done=false;
+        for await(const frame of parseSSE(response.body!,abort.signal)){
+          const event=JSON.parse(frame.data);
+          if(event.type==="status")setActivity(({preparing:"İstek hazırlanıyor",loading_model:"Model belleğe yükleniyor",connecting:"Modele bağlanılıyor",connected:"Bağlantı kuruldu",thinking:"Model düşünüyor",generating:"Yanıt üretiliyor",tool_proposed:"Araç çağrısı hazırlanıyor"} as Record<string,string>)[event.status]||event.status);
+          if(event.type==="text")setMsgs(m=>m.map(x=>x._streamId===streamId?{...x,content:x.content+event.text}:x));
+          if(event.type==="reasoning")setMsgs(m=>m.map(x=>x._streamId===streamId?{...x,metadata:{...x.metadata,reasoning:(x.metadata?.reasoning||"")+event.text}}:x));
+          if(event.type==="error")throw Error(`${event.error} (${event.code})${event.retryAfter!==undefined?` · Retry-After ${event.retryAfter}s`:""}`);
+          if(event.type==="done"){done=true;setEngine(event.engine);setMsgs(m=>m.map(x=>x._streamId===streamId?event.message:x));setCalls((await api(`/api/ai/tools?conversationId=${cid}`)).calls||[]);setActivity(event.needsApproval?"Araç çağrısı için onay bekleniyor":event.truncated?"Yanıt token sınırında kesildi":"Görev tamamlandı");}
+        }
+        if(!done)throw Error("Akış tamamlanmadan bağlantı kesildi");
+      }else{const r=await response.json();setEngine(r.engine||"");setMsgs(m=>[...m,r.message]);setActivity("Görev tamamlandı");}
+    }catch(e:any){const error=abort.signal.aborted?"İstek iptal edildi":e.message;setActivity(error);if(streamed)setMsgs(m=>m.map(x=>x._streamId===streamId?{...x,metadata:{...x.metadata,interrupted:true},content:x.content+`\n[${error}]`}:x));else setMsgs(m=>[...m,{role:"assistant",content:`Error: ${error}`,metadata:{interrupted:true}}]);}
+    finally{setSending(false);abortRef.current=null;}
   }
+  async function decide(call:any,decision:string){
+    if(decision==="approve"&&!confirm(`Bu araç işlemini onaylıyor musun? Terminal komutları Windows hesabının izinleriyle çalışır.\n\n${call.name}\n${JSON.stringify(call.args,null,2)}`))return;
+    const abort=new AbortController();abortRef.current=abort;
+    setSending(true);setActivity(call.name==="write_file"?"Dosya düzenleniyor":call.name==="run_terminal"&&call.args.purpose==="test"?"Test çalıştırılıyor":"Araç çalıştırılıyor");
+    try{await api("/api/ai/tools",{method:"POST",signal:abort.signal,body:JSON.stringify({id:call.id,decision})});await loadConvs(cid);setActivity("Araç sonucu kaydedildi; ajanı devam ettirebilirsin.");}catch(e:any){setActivity(abort.signal.aborted?"İptal istendi; araç durumu yenilendiğinde kontrol et.":e.message);}finally{setSending(false);abortRef.current=null;}
+  }
+  const lastAssistant=[...msgs].reverse().find(m=>m.role==="assistant");
+  const canContinue=lastAssistant?.metadata?.toolCalls?.length&&calls.filter(c=>c.messageId===lastAssistant.id).every(c=>!["proposed","executing"].includes(c.state));
 
   const cur = convs.find((c) => c.id === cid);
   return (
     <div>
       <h1 className="text-xl font-bold mb-1">AI Workspace</h1>
-      <p className="text-[13px] mb-3" style={{ color: "#A1A1AA" }}>Local chat + coding + agent. Engine: <b className="text-white">{engine || "—"}</b> {engine.includes("fallback") && "(Ollama unreachable — start a runtime for real tokens)"}</p>
+      <p className="text-[13px] mb-3" style={{ color: "#A1A1AA" }}>Yerel / bulut sohbet ve onaylı ajan araçları. Engine: <b className="text-white">{engine || "—"}</b> {engine.includes("fallback") && "(Ollama unreachable — start a runtime for real tokens)"}</p>
+      <div className="vex-panel p-2 mb-3 text-[12px]" role="status">{activity || "Hazır"}{modelError&&<span className="text-red-400"> · {modelError}</span>}{sending&&<button className="vex-btn-danger ml-2" onClick={()=>abortRef.current?.abort()}>İsteği durdur</button>}</div>
       <div className="grid gap-3" style={{ gridTemplateColumns: "250px 1fr 260px" }}>
         <div className="vex-panel p-2">
           <button className="vex-btn w-full mb-2" onClick={createConv}>+ New chat</button>
           {(convs || []).map((c) => (
-            <div key={c.id} className={`vex-nav ${cid === c.id ? "active" : ""}`} style={{ cursor: "pointer" }} onClick={async () => { setCid(c.id); const r = await loadConvs(c.id); setMode(c.mode); setSys(c.systemPrompt || ""); setTemp(c.temperature); setCtx(c.contextTokens); setModelId(c.modelId || ""); setPlanning(c.planningModel || ""); setCoding(c.codingModel || ""); setUtility(c.utilityModel || ""); void r; }}>
+            <div key={c.id} className={`vex-nav ${cid === c.id ? "active" : ""}`} style={{ cursor: "pointer" }} onClick={async () => { if(sending)return; setCid(c.id); const r = await loadConvs(c.id); setMode(c.mode); setSys(c.systemPrompt || ""); setTemp(c.temperature); setCtx(c.contextTokens); setModelId(c.modelId || ""); setPlanning(c.planningModel || ""); setCoding(c.codingModel || ""); setUtility(c.utilityModel || ""); setProjectId(c.providerData?.projectId||""); setThinking(c.providerData?.thinking); setEffort(c.providerData?.effort||""); setMaxTokens(c.providerData?.maxTokens||2048); void r; }}>
               <span className="truncate flex-1">{c.title}</span>
               <button className="text-[11px]" style={{ color: "#71717a" }} onClick={async (e) => { e.stopPropagation(); if (confirm("Delete conversation?")) { await api("/api/chat", { method: "POST", body: JSON.stringify({ action: "delete", conversationId: c.id }) }); setCid(""); setMsgs([]); loadConvs(); } }}>✕</button>
             </div>
@@ -558,23 +693,28 @@ function WorkspaceView() {
           <div className="flex-1 overflow-y-auto space-y-2 mb-2" style={{ maxHeight: 440 }}>
             {msgs.map((m, i) => (
               <div key={i} className="p-2.5" style={{ background: m.role === "user" ? "rgba(168,85,247,.12)" : "#131318", borderRadius: 6 }}>
-                <div className="text-[11px] mb-1" style={{ color: m.role === "user" ? "#A855F7" : "#71717a" }}>{m.role === "user" ? "YOU" : `VEX · ${m.tokens || 0} tok${m.genMs ? ` · ${m.genMs}ms · ${m.tokensPerSec || 0} t/s` : ""}`}</div>
+                <div className="text-[11px] mb-1" style={{ color: m.role === "user" ? "#A855F7" : "#71717a" }}>{m.role === "user" ? "YOU" : m.role==="tool" ? "TOOL RESULT" : m.metadata?.provider ? `VEX · ${m.metadata.usage ? `${m.tokens} output tok` : "usage unavailable"}${m.genMs ? ` · ${m.genMs}ms` : ""}` : `VEX · ${m.tokens || 0} tok${m.genMs ? ` · ${m.genMs}ms · ${m.tokensPerSec || 0} t/s` : ""}`}</div>
+                {m.role==="tool"&&<div className="text-[11px] text-purple-400">GERÇEK ARAÇ SONUCU</div>}
+                {m.metadata?.reasoning&&<details><summary className="text-[12px] text-purple-400">Sağlayıcının reasoning çıktısı</summary><pre className="vex-pre text-[12px]">{m.metadata.reasoning}</pre></details>}
                 <pre className="vex-pre text-[13px]">{m.content}</pre>
+                {m.metadata?.localMetrics&&<div className="text-[11px] text-zinc-400 mt-2"><div>Prompt: {m.metadata.localMetrics.promptTokPerSec?.toFixed(1)??'?'} tok/s · Generation: {m.metadata.localMetrics.generationTokPerSec?.toFixed(1)??'?'} tok/s · İlk token: {m.metadata.localMetrics.ttftMs?.toFixed(0)??'?'} ms</div><div>İşlenen prompt: {m.metadata.localMetrics.promptTokens??'?'} · Üretilen: {m.metadata.localMetrics.generationTokens??'?'} · Cache: {m.metadata.localMetrics.cachedTokens??'?'} token · {m.metadata.localMetrics.serverReused?'Model yeniden kullanıldı':'Model yüklendi'} · {m.metadata.localMetrics.device} · GPU katmanı: {m.metadata.localMetrics.offloadedLayers??'?'} / {m.metadata.localMetrics.totalLayers??'?'}</div></div>}
+                {m.metadata?.usage&&<details className="text-[11px]"><summary>API kullanımı · {m.metadata.finishReason}</summary><pre className="vex-pre">{JSON.stringify(m.metadata.usage,null,2)}</pre></details>}
               </div>
             ))}
-            {msgs.length === 0 && <div className="text-[13px]" style={{ color: "#71717a" }}>{cid ? "No messages yet. Set your models on the right, then ask anything — inference stays on this machine." : "Create or select a conversation."}</div>}
+            {msgs.length === 0 && <div className="text-[13px]" style={{ color: "#71717a" }}>{cid ? "Sağdan model seçip mesajını yaz. Bulut seçiliyse mesaj sağlayıcıya gönderilir." : "Create or select a conversation."}</div>}
             <div ref={bottomRef} />
           </div>
           <input className="vex-input mb-2" placeholder="Optional: paste file/error context to attach" value={attach} onChange={(e) => setAttach(e.target.value)} />
           <div className="flex gap-2">
             <input className="vex-input" placeholder={cur ? `Message (${cur.mode})… Enter to send` : "Select a conversation"} value={prompt} onChange={(e) => setPrompt(e.target.value)} onKeyDown={(e) => e.key === "Enter" && send()} disabled={!cid || sending} />
-            <button className="vex-btn" onClick={send} disabled={!cid || sending}>{sending ? "…" : "Send"}</button>
+            <button className="vex-btn" onClick={()=>send()} disabled={!cid || sending}>{sending ? "Model yanıtı hazırlanıyor…" : "Send"}</button>
           </div>
         </div>
         <div className="vex-panel p-3 text-[13px] space-y-2">
           <div className="font-semibold">Session config</div>
+          <p className="text-[11px] text-zinc-400">{cloud?"Bulut seçili: mesaj ve onaylı araç sonuçları sağlayıcıya gönderilir.":"Yerel inference"}</p>
           <label style={{ color: "#A1A1AA" }} className="text-[12px]">Mode<select className="vex-input mt-1" value={mode} onChange={(e) => setMode(e.target.value)}><option value="chat">General chat</option><option value="code">Coding</option><option value="agent">Agent</option><option value="vision">Vision</option></select></label>
-          <label style={{ color: "#A1A1AA" }} className="text-[12px]">Primary model<select className="vex-input mt-1" value={modelId} onChange={(e) => setModelId(e.target.value)}><option value="">(auto by mode)</option>{models.map((m) => <option key={m.id} value={m.name}>{m.name} [{m.status}]</option>)}</select></label>
+          <label style={{ color: "#A1A1AA" }} className="text-[12px]">Primary model<select className="vex-input mt-1" value={modelId} onChange={(e) => setModelId(e.target.value)}><option value="">(auto by mode)</option>{models.map((m) => <option key={m.name} value={m.name}>{m.name} [{m.status}]</option>)}</select></label>
           <label style={{ color: "#A1A1AA" }} className="text-[12px]">Planning model<select className="vex-input mt-1" value={planning} onChange={(e) => setPlanning(e.target.value)}><option value="">—</option>{models.map((m) => <option key={m.id} value={m.name}>{m.name}</option>)}</select></label>
           <label style={{ color: "#A1A1AA" }} className="text-[12px]">Coding model<select className="vex-input mt-1" value={coding} onChange={(e) => setCoding(e.target.value)}><option value="">—</option>{models.map((m) => <option key={m.id} value={m.name}>{m.name}</option>)}</select></label>
           <label style={{ color: "#A1A1AA" }} className="text-[12px]">Utility model<select className="vex-input mt-1" value={utility} onChange={(e) => setUtility(e.target.value)}><option value="">—</option>{models.map((m) => <option key={m.id} value={m.name}>{m.name}</option>)}</select></label>
@@ -583,9 +723,19 @@ function WorkspaceView() {
             <label style={{ color: "#A1A1AA" }} className="text-[12px]">Temp<input className="vex-input mt-1" type="number" step={0.1} min={0} max={2} value={temp} onChange={(e) => setTemp(Number(e.target.value))} /></label>
             <label style={{ color: "#A1A1AA" }} className="text-[12px]">Context<input className="vex-input mt-1" type="number" value={ctx} onChange={(e) => setCtx(Number(e.target.value))} /></label>
           </div>
+          {cloud&&<>
+            <label className="block text-[12px]">Çıktı + reasoning token bütçesi<input className="vex-input" type="number" min={1} max={selected?.capabilities?.maxOutput||131072} value={maxTokens} onChange={e=>setMaxTokens(Number(e.target.value))}/></label>
+            {selected?.capabilities?.thinking&&<label className="block text-[12px]">Düşünme modu<select className="vex-input" value={thinking===undefined?"default":String(thinking)} onChange={e=>setThinking(e.target.value==="default"?undefined:e.target.value==="true")}><option value="default">Model varsayılanı</option><option value="true">Açık</option><option value="false">Kapalı</option></select></label>}
+            {!!selected?.capabilities?.effortValues?.length&&<label className="block text-[12px]">Reasoning effort<select className="vex-input" value={effort} onChange={e=>setEffort(e.target.value)}><option value="">Model varsayılanı</option>{selected.capabilities.effortValues.map((v:string)=><option key={v}>{v}</option>)}</select></label>}
+            {!selected?.capabilities?.effortValues&&(selected?.capabilities?.parameters?.includes("reasoning_effort")||selected?.capabilities?.reasoningStyle==="effort")&&<label className="block text-[12px]">Reasoning effort (değeri API doğrular)<input className="vex-input" value={effort} onChange={e=>setEffort(e.target.value)} placeholder="Boş: model varsayılanı"/></label>}
+            {selected?.capabilities?.vision&&<input className="vex-input" placeholder="Görsel HTTPS URL (isteğe bağlı)" value={image} onChange={e=>setImage(e.target.value)}/>}
+            <p className="text-[11px] text-zinc-400">Tools: {selected?.capabilities?.tools===true?"destekleniyor":"doğrulanmadı; araç gönderilmez"}. Reasoning metni yalnız API sağlarsa gösterilir.</p>
+          </>}
+          {mode==="agent"&&<label className="block text-[12px]">Araçların erişeceği proje<select className="vex-input" value={projectId} onChange={e=>setProjectId(e.target.value)}><option value="">Proje seç (araçlar kapalı)</option>{projects.map(p=><option key={p.id} value={p.id}>{p.name} · {p.permissionMode}</option>)}</select><span className="block break-all mt-1">{projects.find(p=>p.id===projectId)?.path}</span>{!cloud&&<span className="block mt-1">Yerel dosya ajanı: dosya listeler, okur, oluşturur ve düzenler. Her işlem onayını bekler. Düzenleme öncesinde mevcut dosyayı okumasına izin ver; sonra gerçek araç sonuçlarıyla devam ettir.</span>}</label>}
           <button className="vex-btn-ghost w-full" onClick={saveSettings}>Save session</button>
         </div>
       </div>
+      {calls.length>0&&<section className="vex-panel p-3 mt-3"><h2 className="font-semibold mb-2">Ajan araç önerileri ve gerçek sonuçlar</h2>{calls.slice(-20).map(call=><details key={call.id} open={call.state==="proposed"} className="mb-3"><summary className="text-[13px]">{call.name} · {call.state}</summary><p className="text-[11px] break-all">Hedef proje: {projects.find(p=>p.id===call.projectId)?.path||call.projectId||"—"}</p><pre className="vex-pre text-[12px] max-h-64 overflow-auto">{JSON.stringify(call.args,null,2)}</pre>{call.preview&&<><p className="text-[12px]">{call.preview.exists?'Dosya düzenlenecek':'Yeni dosya oluşturulacak'} · {call.preview.file}</p><pre aria-label="Dosya değişiklik önizlemesi" className="vex-pre text-[12px] max-h-64 overflow-auto">{call.preview.diff}</pre><details><summary>Tam dosya: önce / sonra</summary><pre className="vex-pre max-h-64 overflow-auto">{call.preview.before}</pre><pre className="vex-pre max-h-64 overflow-auto">{call.preview.after}</pre></details></>}{call.previewError&&<p className="text-red-400 text-[12px]">{call.previewError}</p>}{call.output&&<pre className="vex-pre text-[12px] max-h-64 overflow-auto">{call.output}</pre>}{call.state==="proposed"&&<div className="flex gap-2"><button className="vex-btn" disabled={sending||!!call.previewError} onClick={()=>decide(call,"approve")}>İşlemi onayla ve çalıştır</button><button className="vex-btn-danger" disabled={sending} onClick={()=>decide(call,"reject")}>Reddet</button></div>}</details>)}{canContinue&&<button className="vex-btn" disabled={sending} onClick={()=>send(true)}>Gerçek araç sonuçlarıyla ajanı devam ettir</button>}</section>}
     </div>
   );
 }
@@ -614,7 +764,7 @@ function ProjectsView() {
     const p = await api(`/api/projects/files?projectId=${id}&pending=1`);
     setPending(p.pending || []);
   }, []);
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { const initial = setTimeout(() => load(), 0); return () => clearTimeout(initial); }, [load]);
 
   async function register() {
     setMsg("");
@@ -751,7 +901,7 @@ function ProjectsView() {
 }
 
 /* ================= GITHUB ================= */
-function GithubView() {
+function GithubView({go}:{go:(key:NavKey)=>void}) {
   const [repos, setRepos] = useState<any[]>([]);
   const [msg, setMsg] = useState("");
   const [form, setForm] = useState({ url: "", branch: "main", localDir: "", permission: "read-write" });
@@ -760,11 +910,16 @@ function GithubView() {
   const [newBranch, setNewBranch] = useState("");
 
   const load = useCallback(async () => { try { const r = await api("/api/git"); setRepos(r.repos || []); } catch (e: any) { setMsg(e.message); } }, []);
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { const initial = setTimeout(() => load(), 0); return () => clearTimeout(initial); }, [load]);
   async function run(body: any) {
     setMsg(""); setOut("");
     try { const r = await api("/api/git", { method: "POST", body: JSON.stringify(body) }); setOut(r.out || r.output || JSON.stringify(r).slice(0, 2000)); load(); }
     catch (e: any) { setMsg(e.message); }
+  }
+  async function openLocalAI(repoId?:string){
+    setMsg('');
+    try{const r=await api('/api/projects',{method:'POST',body:JSON.stringify({action:'connect-local',repoId,localDir:form.localDir,...(!repoId?{permissionMode:form.permission==='read-only'?'read-only':'approval'}:{})})});sessionStorage.setItem('acenter-local-project',r.project.id);go('workspace');}
+    catch(e:any){setMsg(e.message);}
   }
   return (
     <div>
@@ -780,9 +935,10 @@ function GithubView() {
         </div>
         <div className="flex gap-2 mt-2">
           <button className="vex-btn" onClick={() => run({ action: "clone", ...form })}>Clone repository</button>
-          <button className="vex-btn-ghost" onClick={() => run({ action: "connect", url: form.url, localDir: form.localDir, branch: form.branch })}>Connect existing local repo</button>
+          <button className="vex-btn-ghost" onClick={() => run({ action: "connect", ...form })}>Connect existing local repo</button>
+          <button className="vex-btn" disabled={!form.localDir.trim()} onClick={()=>openLocalAI()}>Local Dir ile yerel AI</button>
         </div>
-        <div className="text-[11px] mt-2" style={{ color: "#71717a" }}>Example: Geko7490/VexCenter · branch main · path /src/ · permission Read+Write · push = manual approval (the Push button itself).</div>
+        <div className="text-[11px] mt-2" style={{ color: "#71717a" }}>Local Dir: mevcut klasörün tam yolu (ör. D:\Projeler\Oyunum). Yerel AI bu klasörü doğrudan kullanır. Git deposu veya URL gerekmez; dosya değişiklikleri onayını bekler.</div>
       </div>
       {repos.map((r) => (
         <div key={r.id} className="vex-panel p-3 mb-3">
@@ -796,6 +952,7 @@ function GithubView() {
             <pre className="vex-code vex-pre p-2 text-[11px]" style={{ background: "#131318", borderRadius: 6, maxHeight: 150, overflow: "auto" }}>[log]{`\n`}{r.liveLog || "—"}</pre>
           </div>
           <div className="flex flex-wrap gap-2 mt-2">
+            <button className="vex-btn" onClick={()=>openLocalAI(r.id)}>Yerel AI ile dosyaları düzenle</button>
             <button className="vex-btn-ghost" onClick={() => run({ action: "status", id: r.id })}>Status</button>
             <button className="vex-btn-ghost" onClick={() => run({ action: "diff", id: r.id })}>Diff</button>
             <button className="vex-btn-ghost" onClick={() => run({ action: "fetch", id: r.id })}>Fetch</button>
@@ -820,34 +977,64 @@ function RobloxView() {
   const [msg, setMsg] = useState("");
   const [cmd, setCmd] = useState("inspect");
   const [args, setArgs] = useState('{"service":"Workspace"}');
+  const [endpoint,setEndpoint]=useState("");
 
-  const load = useCallback(async () => { try { const r = await api("/api/roblox"); setBridge(r.bridge); } catch (e: any) { setMsg(e.message); } }, []);
-  useEffect(() => { load(); const t = setInterval(load, 4000); return () => clearInterval(t); }, [load]);
+  const load = useCallback(async () => { try { const r = await api("/api/roblox"); setBridge(r.bridge);setEndpoint(r.endpoint);if(r.error)setMsg(r.error); } catch (e: any) { setMsg(e.message); } }, []);
+  useEffect(() => { const initial = setTimeout(() => load(), 0); const t = setInterval(load, 4000); return () => { clearTimeout(initial); clearInterval(t); }; }, [load]);
   async function run(action: string, extra?: any) {
     setMsg("");
-    try { const r = await api("/api/roblox", { method: "POST", body: JSON.stringify({ action, ...extra }) }); setMsg(r.note || r.result ? JSON.stringify(r.result || r.note) : "ok"); load(); }
+    try {
+      const r = await api("/api/roblox", { method: "POST", body: JSON.stringify({ action, ...extra }) });
+      if (action === "send-command" && r.commandId) {
+        setMsg("Command queued; waiting for Roblox Studio…");
+        const deadline = Date.now() + 60000;
+        while (Date.now() < deadline) {
+          await new Promise((resolve) => setTimeout(resolve, 800));
+          const state = await api(`/api/roblox/commands/${r.commandId}`);
+          if (state.command.status === "completed") { setMsg(JSON.stringify(state.command.result, null, 2)); break; }
+          if (state.command.status === "failed") { setMsg(state.command.error || "Studio command failed."); break; }
+        }
+        if (Date.now() >= deadline) setMsg("Timed out waiting for Studio. Check that the plugin is connected and HTTP requests are enabled.");
+      } else setMsg(r.note || r.result ? JSON.stringify(r.result || r.note) : "ok");
+      load();
+    }
     catch (e: any) { setMsg(e.message); }
+  }
+  async function downloadPlugin() {
+    try {
+      const desktop = (window as Window & { vexDesktop?: { isDesktop: boolean; getApiToken: () => Promise<string> } }).vexDesktop;
+      const token = desktop?.isDesktop ? await desktop.getApiToken() : "";
+      const response = await fetch("/api/roblox?download=plugin", { headers: token ? { "x-vex-local-token": token } : {} });
+      if (!response.ok) throw new Error(`Plugin download failed (${response.status}).`);
+      const url = URL.createObjectURL(await response.blob());
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = "VexBridge.lua";
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch (e: any) { setMsg(e.message); }
   }
   return (
     <div>
       <h1 className="text-xl font-bold mb-1">Roblox Integration</h1>
-      <p className="text-[13px] mb-3" style={{ color: "#A1A1AA" }}>Vex AI Center → local bridge (127.0.0.1) → authenticated WebSocket/poll → Studio plugin. Only real plugin capabilities are exposed. Works fully offline.</p>
+      <p className="text-[13px] mb-3" style={{ color: "#A1A1AA" }}>A-Center on this PC → authenticated HTTP polling over loopback → Roblox Studio plugin. Enable Studio HTTP requests and keep A-Center open while connected.</p>
       {msg && <pre className="vex-panel p-2.5 mb-3 text-[12px] vex-pre" style={{ borderColor: "#A855F7" }}>{msg}</pre>}
       <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(auto-fit,minmax(340px,1fr))" }}>
         <div className="vex-panel p-3">
           <div className="font-semibold mb-2">Connection</div>
           <div className="text-[13px] flex items-center gap-2"><StatusDot status={bridge?.status || "unknown"} /><b>{bridge?.status || "—"}</b><span style={{ color: "#71717a" }}>· last seen {timeAgo(bridge?.lastSeenAt)}</span></div>
           <div className="text-[12px] mt-1" style={{ color: "#A1A1AA" }}>Plugin v{bridge?.pluginVersion} · Bridge v{bridge?.bridgeVersion}</div>
+          <div className="text-[11px] vex-code mt-1">{endpoint}</div>
           <div className="text-[12px] mt-1 vex-code" style={{ color: "#A1A1AA" }}>token: {(bridge?.token || "").slice(0, 18)}… <button className="vex-btn-ghost ml-1" style={{ padding: "1px 8px", fontSize: 11 }} onClick={() => { navigator.clipboard?.writeText(bridge?.token || ""); setMsg("Token copied."); }}>copy</button></div>
           <div className="flex flex-wrap gap-2 mt-3">
-            <a className="vex-btn" style={{ textDecoration: "none" }} href="/api/roblox?download=plugin">Download Plugin (.luau)</a>
+            <button className="vex-btn" onClick={downloadPlugin}>Download Plugin (.lua)</button>
             <button className="vex-btn" onClick={() => run("connect")}>Connect to Studio</button>
             <button className="vex-btn-ghost" onClick={() => run("simulate-studio", { token: bridge?.token })}>Self-test handshake</button>
             <button className="vex-btn-ghost" onClick={() => run("check-install")}>Check Installation</button>
             <button className="vex-btn-ghost" onClick={() => run("regenerate-token")}>New token</button>
             <button className="vex-btn-danger" onClick={() => run("disconnect")}>Disconnect</button>
           </div>
-          <div className="text-[11px] mt-2" style={{ color: "#71717a" }}>Install: copy VexBridge.luau to %LOCALAPPDATA%/Roblox/Plugins/ (manual). Vex never overwrites an existing plugin silently — compare first.</div>
+          <div className="text-[12px] mt-2" style={{ color: "#A1A1AA" }}>Güncel eklentiyi indir. Studio → Plugins → Plugins Folder içindeki eski VexBridge kopyasını değiştir, Studio’yu yeniden başlat. A-Center’da Connect to Studio, ardından Studio araç çubuğunda VexBridge’e bas ve localhost HTTP iznini ver. Yeşil durum yalnız gerçek Studio yanıtından sonra görünür. Self-test Studio bağlantısı kurmaz.</div>
         </div>
         <div className="vex-panel p-3">
           <div className="font-semibold mb-2">Send Studio command</div>
@@ -876,7 +1063,7 @@ function PluginsView() {
   const [plugins, setPlugins] = useState<any[]>([]);
   const [msg, setMsg] = useState("");
   const load = useCallback(async () => { try { const r = await api("/api/plugins"); setPlugins(r.plugins || []); } catch (e: any) { setMsg(e.message); } }, []);
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { const initial = setTimeout(() => load(), 0); return () => clearTimeout(initial); }, [load]);
   async function act(key: string, action: string) {
     setMsg("");
     try { const r = await api("/api/plugins", { method: "POST", body: JSON.stringify({ key, action }) }); if (r.detail) setMsg(`${key}: ${r.detail}`); load(); }
@@ -925,7 +1112,7 @@ function HardwareView() {
     <div>
       <div className="flex items-center justify-between mb-3"><h1 className="text-xl font-bold">Hardware Monitor</h1><button className="vex-btn-ghost" onClick={() => load(true)}>Refresh + estimate</button></div>
       <div className="grid gap-3" style={{ gridTemplateColumns: "repeat(auto-fit,minmax(300px,1fr))" }}>
-        <div className="vex-panel p-4"><div className="font-semibold mb-2">CPU</div><div className="text-[13px]">{hw.cpu.model}</div><div className="text-[12px]" style={{ color: "#A1A1AA" }}>{hw.cpu.cores} cores · {hw.cpu.arch} · load {hw.cpu.load1?.toFixed?.(1)} · {hw.cpu.usage}%</div><div className="vex-bar mt-2"><div style={{ width: `${hw.cpu.usage}%` }} /></div></div>
+        <div className="vex-panel p-4"><div className="font-semibold mb-2">CPU</div><div className="text-[13px]">{hw.cpu.model}</div><div className="text-[12px]" style={{ color: "#A1A1AA" }}>{hw.cpu.cores} cores · {hw.cpu.arch} · load {hw.cpu.load1?.toFixed?.(1)} · {hw.cpu.usage === null ? "unavailable" : `${hw.cpu.usage}%`}</div><div className="vex-bar mt-2"><div style={{ width: `${hw.cpu.usage === null ? "unavailable" : `${hw.cpu.usage}%`}` }} /></div></div>
         <div className="vex-panel p-4"><div className="font-semibold mb-2">RAM</div><div className="text-[13px]">{fmtBytes(hw.mem.total - hw.mem.free)} / {fmtBytes(hw.mem.total)} ({memPct}%)</div><div className="vex-bar mt-2"><div style={{ width: `${memPct}%` }} /></div><div className="text-[12px] mt-1" style={{ color: "#A1A1AA" }}>Free {fmtBytes(hw.mem.free)} for model + KV cache</div></div>
         <div className="vex-panel p-4"><div className="font-semibold mb-2">Disk</div><div className="text-[13px]">{hw.disk.total ? `${fmtBytes(hw.disk.total - hw.disk.free)} / ${fmtBytes(hw.disk.total)} (${diskPct}%)` : "n/a on this host"}</div><div className="vex-bar mt-2"><div style={{ width: `${diskPct}%` }} /></div></div>
         <div className="vex-panel p-4"><div className="font-semibold mb-2">GPU backends</div>
@@ -955,28 +1142,20 @@ function HardwareView() {
 }
 
 /* ================= TASKS ================= */
-function TasksView() {
+function TasksView({go}:{go:(nav:NavKey)=>void}) {
   const [tasks, setTasks] = useState<any[]>([]);
   const [msg, setMsg] = useState("");
   const [form, setForm] = useState({ title: "", kind: "general", assignedModel: "" });
   const [models, setModels] = useState<any[]>([]);
-  const [auto, setAuto] = useState(true);
   const load = useCallback(async () => { try { const r = await api("/api/tasks"); setTasks(r.tasks || []); } catch (e: any) { setMsg(e.message); } }, []);
   useEffect(() => {
-    load(); api("/api/models").then((r) => setModels(r.models || [])).catch(() => {});
+    const initial = setTimeout(() => {
+      load(); api("/api/ai/models").then((r) => setModels((r.models || []).map((m:any)=>({...m,name:m.key})))).catch(() => {});
+    }, 0);
     const t = setInterval(load, 2500); return () => clearInterval(t);
   }, [load]);
-  // auto-advance running tasks step by step
-  useEffect(() => {
-    if (!auto) return;
-    const running = tasks.find((t) => t.status === "running");
-    if (!running) return;
-    const t = setTimeout(async () => {
-      try { await api("/api/tasks", { method: "POST", body: JSON.stringify({ action: "step", id: running.id }) }); load(); } catch {}
-    }, 1200);
-    return () => clearTimeout(t);
-  }, [tasks, auto, load]);
   async function run(action: string, id?: string) {
+    setMsg("");
     try {
       if (action === "create") {
         if (!form.title) { setMsg("Title required"); return; }
@@ -988,8 +1167,8 @@ function TasksView() {
   }
   return (
     <div>
-      <div className="flex items-center justify-between mb-1"><h1 className="text-xl font-bold">Task Manager</h1><label className="text-[12px] flex items-center gap-1" style={{ color: "#A1A1AA" }}><input type="checkbox" checked={auto} onChange={(e) => setAuto(e.target.checked)} /> auto-advance</label></div>
-      <p className="text-[13px] mb-3" style={{ color: "#A1A1AA" }}>Persistent multi-step AI jobs. State survives restarts — recovery never blindly repeats completed steps.</p>
+      <div className="flex items-center justify-between mb-1"><h1 className="text-xl font-bold">Task Manager · Plans + Agent runs</h1></div>
+      <p className="text-[13px] mb-3" style={{ color: "#A1A1AA" }}>Roblox görevlerinde model seçip Başlat düğmesine bas. Studio panelinde önerileri onayla; gerçek sonuçlar burada görünür. Diğer görevleri Agent Engine ile açabilirsin.</p>
       {msg && <div className="vex-panel p-2.5 mb-3 text-[13px]">{msg}</div>}
       <div className="vex-panel p-3 mb-3">
         <div className="grid gap-2" style={{ gridTemplateColumns: "2fr 1fr 1fr auto" }}>
@@ -1015,11 +1194,10 @@ function TasksView() {
             <pre className="vex-code vex-pre p-2 text-[11px]" style={{ background: "#131318", borderRadius: 6, maxHeight: 160, overflow: "auto" }}>{t.logs || "(no logs)"}{t.error ? `\nERROR: ${t.error}` : ""}</pre>
           </div>
           <div className="flex flex-wrap gap-2 mt-2">
-            {(t.status === "queued" || t.status === "paused") && <button className="vex-btn" onClick={() => run(t.status === "paused" ? "resume" : "start", t.id)}>{t.status === "paused" ? "Resume" : "Start"}</button>}
-            {t.status === "running" && <button className="vex-btn-ghost" onClick={() => run("pause", t.id)}>Pause</button>}
-            {t.status === "running" && <button className="vex-btn-ghost" onClick={() => run("step", t.id)}>Step once</button>}
-            {(t.status === "failed" || t.status === "paused") && <button className="vex-btn-ghost" onClick={() => run("retry", t.id)}>Retry</button>}
+            {t.kind === 'roblox' && !['running','awaiting_approval','completed','cancelled'].includes(t.status) && <button className="vex-btn" onClick={()=>run('start',t.id)}>Başlat / devam et</button>}
+            {t.status !== "completed" && t.status !== "cancelled" && <button className="vex-btn" onClick={() => { if (confirm("Have you manually completed and checked this step?")) run("complete-step", t.id); }}>Mark current step done</button>}
             {t.status !== "completed" && t.status !== "cancelled" && <button className="vex-btn-danger" onClick={() => run("cancel", t.id)}>Cancel</button>}
+            <button className="vex-btn" onClick={()=>{sessionStorage.setItem("acenter-agent-task",JSON.stringify({id:t.id,title:t.title,model:t.assignedModel,projectId:t.projectId}));go("workspace");}}>Open with Agent Engine</button>
             <button className="vex-btn-ghost" onClick={() => run("delete", t.id)}>Delete</button>
           </div>
         </div>
@@ -1036,9 +1214,10 @@ function TerminalView() {
   const [msg, setMsg] = useState("");
   const [busy, setBusy] = useState(false);
   const load = useCallback(async () => { try { const r = await api("/api/terminal"); setHist(r.history || []); } catch {} }, []);
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { const initial = setTimeout(() => load(), 0); return () => clearTimeout(initial); }, [load]);
   async function execCmd(approve = false) {
     if (!cmd.trim() || busy) return;
+    if (!approve) { if (!confirm(`Run this shell command with your Windows account permissions?\n\n${cmd}`)) return; approve = true; }
     setBusy(true); setMsg("");
     try { await api("/api/terminal", { method: "POST", body: JSON.stringify({ command: cmd, approveDangerous: approve }) }); setCmd(""); load(); }
     catch (e: any) { setMsg(e.message); }
@@ -1070,12 +1249,35 @@ function TerminalView() {
 function SettingsView() {
   const [s, setS] = useState<Record<string, string>>({});
   const [msg, setMsg] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [drivePresets, setDrivePresets] = useState<{ label: string; path: string }[]>([]);
   const load = useCallback(async () => { try { const r = await api("/api/settings"); setS(r.settings || {}); } catch (e: any) { setMsg(e.message); } }, []);
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { const initial = setTimeout(() => load(), 0); return () => clearTimeout(initial); }, [load]);
+  useEffect(() => {
+    let active = true;
+    const desktop = (window as Window & { vexDesktop?: DesktopBridge }).vexDesktop;
+    void desktop?.getStoragePresets?.().then((presets) => { if (active) setDrivePresets(presets); });
+    return () => { active = false; };
+  }, []);
+  async function chooseStorageDirectory() {
+    const desktop = (window as Window & { vexDesktop?: DesktopBridge }).vexDesktop;
+    if (!desktop?.chooseStorageDirectory) { setMsg("Folder selection is available in the installed desktop app."); return; }
+    const selected = await desktop.chooseStorageDirectory();
+    if (selected) setS((current) => ({ ...current, "storage.root": selected }));
+  }
   async function save() {
     setMsg("");
-    try { await api("/api/settings", { method: "POST", body: JSON.stringify({ values: s }) }); setMsg("Settings saved."); }
-    catch (e: any) { setMsg(e.message); }
+    setSaving(true);
+    try {
+      setMsg("Saving settings and moving local data if the storage folder changed…");
+      const result = await api("/api/settings", { method: "POST", body: JSON.stringify({ values: s }) });
+      if (result.restartRequired) {
+        setMsg("Storage copied. Restarting. Original files are kept as a backup; delete them only after confirming the new location works.");
+        const desktop = (window as Window & { vexDesktop?: DesktopBridge }).vexDesktop;
+        setTimeout(() => desktop?.restartApp?.(), 1200);
+      } else setMsg("Settings saved.");
+    } catch (e: any) { setMsg(e.message); }
+    finally { setSaving(false); }
   }
   const row = (key: string, label: string, type = "text", opts?: string[]) => (
     <div className="grid gap-2 items-center" style={{ gridTemplateColumns: "220px 1fr" }}>
@@ -1088,27 +1290,31 @@ function SettingsView() {
   return (
     <div>
       <h1 className="text-xl font-bold mb-1">Settings</h1>
-      <p className="text-[13px] mb-3" style={{ color: "#A1A1AA" }}>Configurable storage, inference defaults, bridge port. Secrets are never stored here — use OS/Git credential managers.</p>
+      <p className="text-[13px] mb-3" style={{ color: "#A1A1AA" }}>Choose where local models, downloads, projects and app files live. Storage changes move existing files and restart A-Center.</p>
       {msg && <div className="vex-panel p-2.5 mb-3 text-[13px]">{msg}</div>}
       <div className="vex-panel p-4 space-y-3" style={{ maxWidth: 760 }}>
-        {row("storage.root", "Storage root")}
-        {row("storage.models", "Models directory")}
-        {row("storage.workspace", "Workspace directory")}
+        <div className="grid gap-2 items-center" style={{ gridTemplateColumns: "220px 1fr auto" }}>
+          <span className="text-[13px]" style={{ color: "#A1A1AA" }}>Storage folder<br /><span className="vex-code text-[11px]" style={{ color: "#71717a" }}>storage.root</span></span>
+          <input className="vex-input" value={s["storage.root"] || ""} onChange={(e) => setS({ ...s, "storage.root": e.target.value })} placeholder="D:\\A-Center" />
+          <button className="vex-btn-ghost" onClick={chooseStorageDirectory}>Browse…</button>
+        </div>
+        {drivePresets.length > 0 && <div className="flex flex-wrap gap-2" style={{ paddingLeft: 228 }}>{drivePresets.map((drive) => <button key={drive.path} className="vex-btn-ghost" onClick={() => setS({ ...s, "storage.root": drive.path })}>{drive.label} → {drive.path}</button>)}</div>}
+        <div className="text-[11px] vex-code" style={{ color: "#71717a", paddingLeft: 228 }}>Models: {s["storage.root"] ? `${s["storage.root"]}\\models` : "—"} · Workspace: {s["storage.root"] ? `${s["storage.root"]}\\workspace` : "—"}</div>
         {row("models.autoRuntime", "Automatic runtime selection", "select", ["1", "0"])}
         {row("chat.defaultTemp", "Default temperature")}
         {row("chat.defaultCtx", "Default context tokens")}
         {row("terminal.defaultCwd", "Terminal default cwd")}
         {row("terminal.allowDangerous", "Allow dangerous commands (still needs per-command approval)", "select", ["0", "1"])}
-        {row("roblox.port", "Roblox bridge port")}
+        <p className="text-[12px] text-zinc-400">Roblox masaüstü köprüsü: 127.0.0.1:7817 (sabit port)</p>
         {row("updates.check", "Check for runtime/plugin updates", "select", ["1", "0"])}
-        <button className="vex-btn" onClick={save}>Save settings</button>
+        <button className="vex-btn" onClick={save} disabled={saving}>{saving ? "Saving…" : "Save settings"}</button>
       </div>
       <div className="vex-panel p-4 mt-3" style={{ maxWidth: 760 }}>
         <div className="font-semibold text-[14px] mb-1">Offline operations matrix</div>
         <div className="text-[12px]" style={{ color: "#A1A1AA" }}>
           <div><b className="text-white">Online only:</b> model downloads · runtime downloads · plugin downloads · git sync · update checks</div>
           <div><b className="text-white">Offline:</b> inference · chat · coding · project editing · Roblox bridge · tasks · plugins · hardware · terminal</div>
-          <div className="mt-1">Test: disconnect after setup — everything installed keeps working. No telemetry, no license phone-home.</div>
+          <div className="mt-1">Test: disconnect after setup — everything installed keeps working. Cloud providers require internet; local inference stays offline.</div>
         </div>
       </div>
     </div>

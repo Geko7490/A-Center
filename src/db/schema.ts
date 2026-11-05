@@ -106,6 +106,7 @@ export const conversations = pgTable("vex_conversations", {
   systemPrompt: text("system_prompt").notNull().default(""),
   temperature: real("temperature").notNull().default(0.7),
   contextTokens: integer("context_tokens").notNull().default(4096),
+  providerData: jsonb("provider_data").$type<Record<string, any>>().notNull().default({}),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
@@ -117,6 +118,28 @@ export const messages = pgTable("vex_messages", {
   tokens: integer("tokens").notNull().default(0),
   genMs: integer("gen_ms").notNull().default(0),
   tokensPerSec: real("tokens_per_sec").notNull().default(0),
+  metadata: jsonb("metadata").$type<Record<string, any>>().notNull().default({}),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const aiUsage = pgTable("vex_ai_usage", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  requestId: text("request_id").notNull().unique(),
+  provider: text("provider").notNull(),
+  model: text("model").notNull(),
+  usage: jsonb("usage").$type<Record<string, unknown>>().notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+export const aiToolCalls = pgTable("vex_ai_tool_calls", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  conversationId: uuid("conversation_id").notNull(),
+  messageId: uuid("message_id").notNull(),
+  projectId: text("project_id").notNull().default(""),
+  callId: text("call_id").notNull(),
+  name: text("name").notNull(),
+  args: jsonb("args").$type<Record<string, unknown>>().notNull(),
+  state: text("state").notNull().default("proposed"),
+  output: text("output").notNull().default(""),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
@@ -186,6 +209,18 @@ export const robloxBridges = pgTable("vex_roblox", {
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 
+export const robloxCommands = pgTable("vex_roblox_commands", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  bridgeId: uuid("bridge_id").notNull(),
+  command: text("command").notNull(),
+  args: jsonb("args").$type<Record<string, unknown>>().notNull().default({}),
+  status: text("status").notNull().default("queued"),
+  result: jsonb("result").$type<unknown>(),
+  error: text("error").notNull().default(""),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  completedAt: timestamp("completed_at"),
+});
+
 export const terminalHistory = pgTable("vex_terminal_history", {
   id: uuid("id").primaryKey().defaultRandom(),
   command: text("command").notNull(),
@@ -202,3 +237,4 @@ export const appSettings = pgTable("vex_settings", {
   value: text("value").notNull().default(""),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
+

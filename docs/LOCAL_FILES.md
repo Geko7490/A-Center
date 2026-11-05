@@ -1,0 +1,16 @@
+# Local Dir file agent
+
+Version 0.5.0 connects local GGUF and Ollama models to project file actions.
+
+1. In GitHub Manager, enter an existing absolute folder in **Local Dir**, then choose **Local Dir ile yerel AI**. A Git repository or remote URL is optional. Connected repositories also have **Yerel AI ile dosyaları düzenle**.
+2. This registers the actual folder, without copying it into workspace. AI Workspace opens a new Agent conversation with that project and an installed local model selected. Select another local model if desired.
+3. Ask for a file creation or edit. Approve the proposed directory listing or file read, then choose **Gerçek araç sonuçlarıyla ajanı devam ettir**. Existing files must be read before they can be edited.
+4. Review the proposed diff and full before/after content. Approve writes individually. Rejection leaves the file untouched. Existing project backups and file history apply; Project Manager can restore a previous version using its permission controls.
+
+The model uses a validated JSON action protocol, so native model tool templates are not required. Available actions are `analyze_project`, `read_file` and `write_file`, with at most four proposals per turn. The agent does not run a shell or Git commands. It always needs explicit action approval, including for projects configured as auto. Listing and reading also require approval. Model quality and instruction-following affect whether it produces a valid plan; invalid/truncated plans never change files.
+
+Actions are pinned to the project that produced the proposal. Changing the session's project does not retarget pending proposals. Read-only project and repository permissions, protected files, excluded folders, file limits and realpath/junction boundaries are checked. Local file content is capped at 128,000 bytes per action (or the project's smaller limit). Full-content replacement is used, with an approved current read required for existing files. If a file changes after proposal creation, approval fails with `file_conflict`; reject a stale preview and request a fresh read. Files remain untouched until approval. As with other filesystem applications, external writes during the brief actual save are not an atomic cross-process transaction.
+
+GGUF requests reuse the persistent llama-server and count actual template tokens to reserve an output budget. Long files/history can exceed a small context; use smaller files, a new conversation or a larger context. Ollama uses the same proposal/approval pipeline. No API key or internet connection is needed for an already-installed local model/runtime. Selecting a cloud provider sends conversation context and approved read results to that provider, as described in the cloud guide.
+
+`npm run test:files` checks actual registration, local chat routing, approved create/read/edit, rejection, backups, stale-file conflicts, project pinning, traversal/protected/excluded/junction guards and read-only permissions with deterministic model output. Set `A_CENTER_TEST_MODEL`, optionally `A_CENTER_TEST_RUNTIME` and `A_CENTER_TEST_DEVICE`, to additionally run real GGUF generation and approved file creation, read and edit in an isolated folder. `npm run test:ui` covers Local Dir handoff and the proposal preview/approval controls with UI fixtures.

@@ -3,6 +3,9 @@ import path from "node:path";
 import os from "node:os";
 import crypto from "node:crypto";
 import { execSync, exec } from "node:child_process";
+import { generateLlama } from "./llama";
+import { ProbeCache } from './cache';
+import type { LlamaOptions,LocalMetrics } from './llama-server';
 
 export const STORAGE_ROOT =
   process.env.VEX_STORAGE || path.join(process.cwd(), ".vex-storage");
@@ -76,6 +79,14 @@ export function safeJoin(base: string, ...parts: string[]): string {
   if (resolved !== baseResolved && !resolved.startsWith(baseResolved + path.sep)) {
     throw new Error("Path traversal blocked: target escapes authorized directory");
   }
+  let ancestor = resolved;
+  while (!fs.existsSync(ancestor) && path.dirname(ancestor) !== ancestor) ancestor = path.dirname(ancestor);
+  if (fs.existsSync(baseResolved) && fs.existsSync(ancestor)) {
+    const realBase = fs.realpathSync(baseResolved);
+    const realTarget = path.resolve(fs.realpathSync(ancestor), path.relative(ancestor, resolved));
+    const rel = path.relative(realBase, realTarget);
+    if (rel === ".." || rel.startsWith(`..${path.sep}`) || path.isAbsolute(rel)) throw new Error("Symbolic link escapes authorized directory");
+  }
   return resolved;
 }
 
@@ -135,7 +146,7 @@ export function getHardwareSnapshot() {
   } catch { cpuUsage = 0; }
   const nvidia = execSafe("nvidia-smi --query-gpu=name,memory.total,memory.used,utilization.gpu --format=csv,noheader 2>&1");
   const rocm = execSafe("rocm-smi --showproductname --showmeminfo vram --showuse 2>&1");
-  const vulkan = execSafe("vulkaninfo --summary 2>&1 | head -n 40");
+  const vulkan = execSafe(process.platform === "win32" ? "vulkaninfo --summary 2>&1 | Select-Object -First 40" : "vulkaninfo --summary 2>&1 | head -n 40");
   let diskTotal = 0, diskFree = 0;
   try {
     if (process.platform !== "win32") {
@@ -144,7 +155,7 @@ export function getHardwareSnapshot() {
       diskTotal = Number(parts[1]) * 1024 || 0;
       diskFree = Number(parts[3]) * 1024 || 0;
     } else {
-      diskTotal = 512 * 1024 ** 3; diskFree = 128 * 1024 ** 3;
+      const stat = fs.statfsSync(STORAGE_ROOT); diskTotal = Number(stat.blocks) * Number(stat.bsize); diskFree = Number(stat.bavail) * Number(stat.bsize);
     }
   } catch { /* ignore */ }
   const gpus: { name: string; backend: string; vramTotal: number; vramUsed: number; util: number }[] = [];
@@ -154,9 +165,13 @@ export function getHardwareSnapshot() {
     const parseMiB = (s: string) => { const m = s.match(/([\d.]+)/); return m ? Number(m[1]) * 1024 * 1024 : 0; };
     gpus.push({ name: name || "NVIDIA GPU", backend: "CUDA", vramTotal: parseMiB(total || ""), vramUsed: parseMiB(used || ""), util: Number(String(util).replace(/\D/g, "")) || 0 });
   }
+  if (process.platform === "win32" && !gpus.length) {
+    const inventory = execSafe("Get-CimInstance Win32_VideoController | Select-Object -ExpandProperty Name");
+    if (inventory.ok) for (const name of inventory.out.trim().split(/\r?\n/).filter(Boolean)) gpus.push({ name, backend: /amd|radeon/i.test(name) ? "Vulkan (verify runtime)" : "unknown", vramTotal: 0, vramUsed: 0, util: 0 });
+  }
   const hasAmdHint = /amd|radeon/i.test(cpuModel + " " + vulkan.out);
   return {
-    cpu: { model: cpuModel, cores, arch: os.arch(), usage: cpuUsage, load1: load[0], load5: load[1], load15: load[2], tempC: null as number | null },
+    cpu: { model: cpuModel, cores, arch: os.arch(), usage: process.platform === "win32" ? null : cpuUsage, load1: load[0], load5: load[1], load15: load[2], tempC: null as number | null },
     mem: { total: totalMem, free: freeMem, used: totalMem - freeMem },
     disk: { total: diskTotal, free: diskFree, used: diskTotal - diskFree },
     gpus,
@@ -181,33 +196,41 @@ export function estimateModelMemory(sizeBytes: number, contextTokens: number, qu
   return { modelMem, kvCache, overhead, total, note: "Heuristic estimate (model file + KV cache + runtime overhead). Not a benchmark." };
 }
 
-export async function checkOllama(): Promise<{ available: boolean; models: string[]; version?: string; error?: string }> {
+type OllamaStatus={ available: boolean; models: string[]; version?: string; error?: string };
+const probeState=globalThis as typeof globalThis & {aCenterOllamaCache?:ProbeCache<OllamaStatus>};
+const ollamaCache=probeState.aCenterOllamaCache ||= new ProbeCache<OllamaStatus>(10000,3000);
+export async function checkOllama(force=false): Promise<OllamaStatus> {
+ return ollamaCache.get('localhost',async()=>{
+  const ctrl = new AbortController();
+  const t = setTimeout(() => ctrl.abort(), 3000);
   try {
-    const ctrl = new AbortController();
-    const t = setTimeout(() => ctrl.abort(), 3000);
     const res = await fetch("http://127.0.0.1:11434/api/tags", { signal: ctrl.signal });
-    clearTimeout(t);
     if (!res.ok) return { available: false, models: [], error: `HTTP ${res.status}` };
     const j = (await res.json()) as { models?: { name: string }[] };
     return { available: true, models: (j.models || []).map((m) => m.name) };
   } catch (e: unknown) {
     return { available: false, models: [], error: e instanceof Error ? e.message : "unreachable" };
-  }
+  }finally{clearTimeout(t);}
+ },force);
 }
 
-export async function ollamaGenerate(model: string, prompt: string, system?: string, opts?: { temperature?: number; num_ctx?: number }): Promise<{ text: string; ms: number; tps: number }> {
+export async function ollamaGenerate(model: string, prompt: string, system?: string, opts?: { temperature?: number; num_ctx?: number; num_predict?:number; signal?:AbortSignal }) {
   const started = Date.now();
   const res = await fetch("http://127.0.0.1:11434/api/generate", {
     method: "POST",
+    signal: AbortSignal.any([AbortSignal.timeout(300000),opts?.signal||new AbortController().signal]),
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ model, prompt, system: system || "", stream: false, options: { temperature: opts?.temperature ?? 0.7, num_ctx: opts?.num_ctx ?? 4096 } }),
+    body: JSON.stringify({ model, prompt, system: system || "", stream: false, options: { temperature: opts?.temperature ?? 0.7, num_ctx: opts?.num_ctx ?? 4096,...(opts?.num_predict?{num_predict:Math.max(1,Math.min(131072,opts.num_predict))}:{}) } }),
   });
   if (!res.ok) throw new Error(`Ollama error HTTP ${res.status}: ${await res.text().then((t) => t.slice(0, 500))}`);
-  const j = (await res.json()) as { response?: string; eval_count?: number; eval_duration?: number };
+  const j = (await res.json()) as { response?: string; eval_count?: number; eval_duration?: number;prompt_eval_count?:number;prompt_eval_duration?:number;load_duration?:number };
   const ms = Date.now() - started;
-  const toks = j.eval_count || Math.ceil((j.response || "").length / 4);
-  const tps = ms > 0 ? Math.round((toks / ms) * 1000) : 0;
-  return { text: j.response || "", ms, tps };
+  const metrics:LocalMetrics={promptTokens:j.prompt_eval_count??null,generationTokens:j.eval_count??null,cachedTokens:null,promptMs:j.prompt_eval_duration===undefined?null:j.prompt_eval_duration/1e6,generationMs:j.eval_duration===undefined?null:j.eval_duration/1e6,promptTokPerSec:j.prompt_eval_count!==undefined&&j.prompt_eval_duration?j.prompt_eval_count*1e9/j.prompt_eval_duration:null,generationTokPerSec:j.eval_count!==undefined&&j.eval_duration?j.eval_count*1e9/j.eval_duration:null,ttftMs:null,requestTtftMs:null,loadMs:(j.load_duration||0)/1e6,totalMs:ms,serverReused:false,workerPid:null,device:'Ollama (backend unknown)',offloadedLayers:null,totalLayers:null};
+  return { text: j.response || "", ms, tps:metrics.generationTokPerSec||0,metrics };
+}
+
+export async function llamaCppGenerate(modelPath: string, prompt: string, system: string, opts?: LlamaOptions) {
+  return generateLlama(path.join(RUNTIMES_DIR, "llama.cpp"), modelPath, prompt, system, opts || {});
 }
 
 export function localFallbackReply(prompt: string, mode: string, systemPrompt?: string): { text: string; tps: number } {
@@ -227,85 +250,9 @@ export function pairingToken(): string {
   return "vex-" + crypto.randomBytes(16).toString("hex");
 }
 
-export function robloxPluginSource(bridgeToken: string): string {
-  return `-- Vex AI Center :: Roblox Studio Bridge Plugin (Luau)
--- Install: place this file in %LOCALAPPDATA%/Roblox/Plugins/VexBridge.luau
--- Manual install supported. Never overwritten silently by Vex AI Center.
-local HttpService = game:GetService("HttpService")
-local Selection = game:GetService("Selection")
-local StudioService = game:GetService("StudioService")
-local BRIDGE_URL = "http://127.0.0.1:7817/roblox"
-local AUTH_TOKEN = "${bridgeToken}"
-local toolbar = plugin:CreateToolbar("Vex AI")
-local toggleBtn = toolbar:CreateButton("VexBridge", "Connect Vex AI Center local bridge", "rbxassetid://0")
-local connected = false
-local function log(msg) print("[VexBridge] " .. tostring(msg)) end
-local function api(path, method, body)
-  local url = BRIDGE_URL .. path
-  local headers = { ["Content-Type"] = "application/json", ["X-Vex-Token"] = AUTH_TOKEN }
-  local payload = body and HttpService:JSONEncode(body) or nil
-  local ok, res = pcall(function()
-    if method == "POST" then return HttpService:PostAsync(url, payload or "{}", Enum.HttpContentType.ApplicationJson, false, headers)
-    else return HttpService:GetAsync(url, true, headers) end
-  end)
-  if not ok then return nil, tostring(res) end
-  local dok, data = pcall(function() return HttpService:JSONDecode(res) end)
-  return (dok and data or res), nil
-end
-local function serializeInstance(inst, depth)
-  depth = depth or 0
-  if depth > 3 then return { Name = inst.Name, ClassName = inst.ClassName, truncated = true } end
-  local kids = {}
-  for _, c in ipairs(inst:GetChildren()) do table.insert(kids, serializeInstance(c, depth + 1)) end
-  return { Name = inst.Name, ClassName = inst.ClassName, Path = inst:GetFullName(), Children = kids }
-end
-local function poll()
-  while connected do
-    local cmd, err = api("/next-command", "GET", nil)
-    if cmd and type(cmd) == "table" and cmd.action then
-      local ok, result = pcall(function()
-        if cmd.action == "inspect" then
-          local root = game:GetService(cmd.service or "Workspace")
-          return serializeInstance(root, 0)
-        elseif cmd.action == "read-script" then
-          local inst = game:GetService("ServerScriptService"):FindFirstChild(cmd.name, true) or game:GetService("Workspace"):FindFirstChild(cmd.name, true)
-          if inst and inst:IsA("LuaSourceContainer") then return { Source = inst.Source, Path = inst:GetFullName() } end
-          return { error = "script not found: " .. tostring(cmd.name) }
-        elseif cmd.action == "write-script" then
-          local parent = game:GetService(cmd.parent or "ServerScriptService")
-          local inst = parent:FindFirstChild(cmd.name) or Instance.new(cmd.className or "Script")
-          inst.Name = cmd.name
-          if inst:IsA("LuaSourceContainer") then inst.Source = cmd.source or "" end
-          inst.Parent = parent
-          return { ok = true, Path = inst:GetFullName() }
-        elseif cmd.action == "set-property" then
-          local inst = game:GetService("Workspace"):FindFirstChild(cmd.target, true)
-          if inst then pcall(function() (inst :: any)[cmd.property] = cmd.value end) return { ok = true } end
-          return { error = "instance not found" }
-        elseif cmd.action == "create-instance" then
-          local inst = Instance.new(cmd.className or "Part")
-          inst.Name = cmd.name or cmd.className
-          if cmd.properties then for k, v in pairs(cmd.properties) do pcall(function() (inst :: any)[k] = v end) end end
-          inst.Parent = game:GetService(cmd.parent or "Workspace")
-          return { ok = true, Path = inst:GetFullName() }
-        end
-        return { error = "unknown action" }
-      end)
-      pcall(function() api("/command-result", "POST", { id = cmd.id, ok = ok, result = result }) end)
-    end
-    task.wait(1)
-  end
-end
-toggleBtn.Click:Connect(function()
-  connected = not connected
-  toggleBtn:SetActive(connected)
-  if connected then log("connected to Vex AI Center bridge (local only)") task.spawn(poll)
-  else log("disconnected") end
-end)
-log("Vex AI Bridge plugin loaded. Press the VexBridge toolbar button to connect.")
-`;
+export function robloxPluginSource(bridgeToken: string, port = 7817): string {
+  return fs.readFileSync(path.join(process.cwd(), 'src', 'lib', 'studio-plugin.lua'), 'utf8').replaceAll('__PORT__', String(port)).replaceAll('__TOKEN__', bridgeToken);
 }
-
 export const DANGEROUS_PATTERNS = [
   /rm\s+-rf\s+\/(?:\s|$)/, /mkfs/, /dd\s+if=.*of=\/dev\//, /shutdown/, /reboot/,
   /:\(\)\s*{\s*:\|:\s*&\s*}/, /powershell.*-EncodedCommand/i,
@@ -340,3 +287,4 @@ export function walkDir(root: string, opts?: { maxFiles?: number; exclude?: stri
   }
   return out;
 }
+

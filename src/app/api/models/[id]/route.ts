@@ -1,11 +1,17 @@
+import { storageBusy } from "@/lib/maintenance";
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
-import { models, testResults } from "@/db/schema";
+import { models, testResults,runtimes } from "@/db/schema";
 import { eq } from "drizzle-orm";
 import fs from "node:fs";
-import { checkOllama, estimateModelMemory, FORMAT_RUNTIME_MATRIX, getHardwareSnapshot } from "@/lib/vex";
+import { probeLlama,llamaServer } from "@/lib/llama";
+import type {LlamaOptions} from '@/lib/llama-server';
+import { RUNTIMES_DIR } from "@/lib/vex";
+import path from "node:path";
+import { checkOllama, estimateModelMemory, FORMAT_RUNTIME_MATRIX, getHardwareSnapshot, llamaCppGenerate } from "@/lib/vex";
 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  if (storageBusy()) return NextResponse.json({ error: "Storage relocation in progress. Restart A-Center before making changes." }, { status: 409 });
   const { id } = await params;
   const body = await req.json().catch(() => ({}));
   const action = (body as { action?: string }).action || "";
@@ -42,11 +48,16 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       }
       note += ` Ollama reachable (${oc.models.length} models).`;
     }
-    await db.update(models).set({ status: "running", compatibilityStatus: fits ? "compatible" : "compatible-low-mem", activeRuntime: runtime, lastUsedAt: new Date() }).where(eq(models.id, id));
+    if (runtime === "llama.cpp") {
+      try { await probeLlama(path.join(RUNTIMES_DIR, "llama.cpp")); }
+      catch (error) { return NextResponse.json({ error: String(error) }, { status: 400 }); }
+    } else if (runtime !== "ollama") return NextResponse.json({ error: "Adapter not implemented" }, { status: 400 });
+    await db.update(models).set({ status: "ready", compatibilityStatus: fits ? "compatible" : "compatible-low-mem", activeRuntime: runtime, lastUsedAt: new Date() }).where(eq(models.id, id));
     return NextResponse.json({ ok: true, note, estimate: est, hardware: { ramFree: availRam, vramFree } });
   }
   if (action === "stop" || action === "restart") {
-    const next = action === "stop" ? "stopped" : "running";
+    try{await llamaServer.stop(m.installPath);}catch(e){return NextResponse.json({error:String(e)},{status:409});}
+    const next = "stopped";
     await db.update(models).set({ status: next, lastUsedAt: new Date() }).where(eq(models.id, id));
     return NextResponse.json({ ok: true, status: next });
   }
@@ -61,23 +72,20 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     // Real inference test via Ollama if possible
     let output = "", tps = 0, status = "passed", error = "";
     try {
-      if (m.activeRuntime === "ollama" || (m.runtimes || []).includes("ollama")) {
+      if (m.format === "GGUF" && !m.installPath.startsWith("ollama:") && m.activeRuntime !== "ollama") {
+        const rt=(await db.select().from(runtimes).where(eq(runtimes.name,'llama.cpp')))[0];const cfg=(rt?.config||{}) as LlamaOptions&{ctxSize?:number};
+        const result = await llamaCppGenerate(m.installPath, "Reply with OK.", "", {...cfg,contextTokens:cfg.ctxSize||4096,maxTokens:64,signal:req.signal});
+        output = result.text; tps = result.tps;
+      } else if (m.activeRuntime === "ollama" || m.installPath.startsWith("ollama:")) {
         const oc = await checkOllama();
-        if (oc.available) {
-          const { ollamaGenerate } = await import("@/lib/vex");
-          const r = await ollamaGenerate(oc.models[0] || m.name, "Reply with exactly: VEX-OK", "", { temperature: 0 });
-          output = r.text; tps = r.tps;
-          if (!output.trim()) { status = "failed"; error = "empty generation"; }
-        } else {
-          status = "failed"; error = `Ollama unreachable: ${oc.error}`;
-          output = "File validation passed; live inference skipped (runtime unreachable). NOT marked working.";
-          status = "failed";
-        }
-      } else {
-        // llama.cpp/onnx: validate file + report honestly
-        output = `Validated ${m.format} container at ${m.installPath || "(managed)"}. Live load test requires the ${m.activeRuntime} binary on PATH. Marked as untested-needs-runtime.`;
-        status = "failed"; error = `${m.activeRuntime} binary not verified in this environment`;
-      }
+        const name = m.installPath.startsWith("ollama:") ? m.installPath.slice(7) : m.name;
+        const target = oc.models.find((x) => x === name || x === `${name}:latest`);
+        if (!target) throw new Error(`Selected model not found in Ollama: ${name}`);
+        const { ollamaGenerate } = await import("@/lib/vex");
+        const result = await ollamaGenerate(target, "Reply with OK.", "", { temperature: 0 });
+        output = result.text; tps = result.tps;
+      } else throw new Error("Adapter not implemented for this model");
+      if (!output.trim()) throw new Error("No generated text");
     } catch (e: unknown) {
       status = "failed"; error = e instanceof Error ? e.message : "test crashed";
     }
@@ -106,11 +114,13 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 }
 
 export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+  if (storageBusy()) return NextResponse.json({ error: "Storage relocation in progress. Restart A-Center before making changes." }, { status: 409 });
   const { id } = await params;
   const rows = await db.select().from(models).where(eq(models.id, id));
   const m = rows[0];
   if (!m) return NextResponse.json({ error: "not found" }, { status: 404 });
   if (m.status === "running") return NextResponse.json({ error: "Stop the model before deleting." }, { status: 400 });
+  try{await llamaServer.stop(m.installPath);}catch(e){return NextResponse.json({error:String(e)},{status:409});}
   try {
     if (m.installPath && fs.existsSync(m.installPath)) {
       const st = fs.statSync(m.installPath);

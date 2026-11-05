@@ -1,3 +1,4 @@
+import { storageBusy } from "@/lib/maintenance";
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/db";
 import { plugins } from "@/db/schema";
@@ -23,6 +24,7 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
+  if (storageBusy()) return NextResponse.json({ error: "Storage relocation in progress. Restart A-Center before making changes." }, { status: 409 });
   await seed();
   const body = await req.json().catch(() => ({}));
   const b = body as { action?: string; key?: string };
@@ -36,7 +38,7 @@ export async function POST(req: NextRequest) {
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(path.join(dir, "manifest.json"), JSON.stringify({ key: p.key, version: p.latestVersion, permissions: p.permissions, installedAt: new Date().toISOString() }, null, 2));
     fs.writeFileSync(path.join(dir, "README.md"), `# ${p.name}\n\n${p.description}\n\nPermissions: ${(p.permissions as string[]).join(", ")}\nSandboxed to workspace + declared APIs only.\n`);
-    await db.update(plugins).set({ installed: true, enabled: true, status: "enabled", version: p.latestVersion, health: "healthy" }).where(eq(plugins.key, b.key));
+    await db.update(plugins).set({ installed: true, enabled: true, status: "enabled", version: p.latestVersion, health: "unknown" }).where(eq(plugins.key, b.key));
     return NextResponse.json({ ok: true });
   }
   if (b.action === "uninstall") {
@@ -51,13 +53,13 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ ok: true });
   }
   if (b.action === "update") {
-    await db.update(plugins).set({ version: p.latestVersion, health: "healthy" }).where(eq(plugins.key, b.key));
+    await db.update(plugins).set({ version: p.latestVersion, health: "unknown" }).where(eq(plugins.key, b.key));
     return NextResponse.json({ ok: true });
   }
   if (b.action === "health") {
-    const healthy = p.installed && fs.existsSync(path.join(dir, "manifest.json"));
+    const healthy = p.installed && ["roblox-bridge", "github-connector", "terminal-tools"].includes(p.key) && fs.existsSync(path.join(dir, "manifest.json"));
     await db.update(plugins).set({ health: healthy ? "healthy" : "broken" }).where(eq(plugins.key, b.key));
-    return NextResponse.json({ ok: true, health: healthy ? "healthy" : "broken", detail: healthy ? "manifest + sandbox permissions verified" : "manifest missing — reinstall" });
+    return NextResponse.json({ ok: true, health: healthy ? "healthy" : "broken", detail: healthy ? "Built-in adapter metadata present; verify connection in its integration menu" : "Adapter unavailable or manifest missing" });
   }
   return NextResponse.json({ error: "unknown action" }, { status: 400 });
 }
