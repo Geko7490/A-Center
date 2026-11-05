@@ -20,7 +20,7 @@ export async function GET(request: NextRequest) {
     .orderBy(asc(robloxCommands.createdAt)).limit(1);
   const command = queued[0];
   if (!command||command.status!=='queued') return NextResponse.json({ok:true,bridgeVersion:BRIDGE_VERSION},{headers:{"cache-control":"no-store"}});
-  if((command.args._taskId||!['inspect','read-script'].includes(command.command))&&version!=='1.4.0')return NextResponse.json({error:'This command requires the VexBridge 1.4.0 panel. Disable old plugin copies.'},{status:409});
+  if((command.args._taskId||!['inspect','read-script'].includes(command.command))&&request.nextUrl.searchParams.get('version')!=='1.4.0')return NextResponse.json({error:'This command requires the VexBridge 1.4.0 panel. Disable old plugin copies.'},{status:409});
 
   const claimed=await db.update(robloxCommands).set({ status: "running" }).where(and(eq(robloxCommands.id, command.id),eq(robloxCommands.status,"queued"))).returning();
   return NextResponse.json(claimed.length?{ ...command.args, id: command.id, action: command.command }:{ok:true},{headers:{"cache-control":"no-store"}});

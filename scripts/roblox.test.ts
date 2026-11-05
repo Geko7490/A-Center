@@ -8,7 +8,7 @@ test('Studio task actually generates proposals, waits for approval and verifies 
   aiManager.resolve=async()=>({id:'mock',capabilities:{source:'test fixture'},provider:'evren',owner:'mock',task:'chat',modalities:[]});
   aiManager.client=async()=>({async *generate(){yield{type:'text',text:JSON.stringify({commands:[{action:'write-script',args:{name:'Main',parent:'ServerScriptService',source:'print("hello")'}}]})};}} as any);
   const {POST:taskAction}=await import('../src/app/api/tasks/route');const {GET:next}=await import('../src/app/roblox/next-command/route');const {POST:result}=await import('../src/app/roblox/command-result/route');const {GET:panel,POST:panelAction}=await import('../src/app/roblox/panel/route');const {taskCommands,parseStudioPlan}=await import('../src/lib/roblox-tasks');
-  const req=(url:string,body?:object)=>new NextRequest('http://127.0.0.1'+url,{method:body?'POST':'GET',headers:{'x-vex-token':'test-pair'},...(body?{body:JSON.stringify(body)}:{})});
+  const req=(url:string,body?:object)=>new NextRequest('http://127.0.0.1'+(url==='/roblox/next-command'?url+'?version=1.4.0':url),{method:body?'POST':'GET',headers:{'x-vex-token':'test-pair'},...(body?{body:JSON.stringify(body)}:{})});
   assert.equal((await panel(new NextRequest('http://127.0.0.1/roblox/panel'))).status,401);
   assert.throws(()=>parseStudioPlan('{"commands":[{"action":"delete-game","args":{}}]}'),/Invalid/);
   assert.throws(()=>parseStudioPlan('{"commands":[{"action":"write-script","args":{"name":"x","source":"x","id":"fake"}}]}'),/Invalid/);
@@ -20,6 +20,7 @@ test('Studio task actually generates proposals, waits for approval and verifies 
   assert.equal((await(await next(req('/roblox/next-command'))).json()).action,undefined);
   assert.equal((await(await panel(req('/roblox/panel'))).json()).proposals[0].args.source,'print("hello")');
   assert.equal((await panelAction(req('/roblox/panel',{action:'approve',id:proposal.id}))).status,200);
+  assert.equal((await next(new NextRequest('http://127.0.0.1/roblox/next-command',{headers:{'x-vex-token':'test-pair'}}))).status,409);
   assert.equal((await panelAction(req('/roblox/panel',{action:'approve',id:proposal.id}))).status,400);
   const write=await(await next(req('/roblox/next-command'))).json();assert.equal(write.action,'write-script');
   const receipt={id:write.id,ok:true,result:{verified:true,Source:write.source,PreviousSource:'',Path:'ServerScriptService.Main'}};
